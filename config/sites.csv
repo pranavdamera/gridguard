@@ -1,0 +1,8 @@
+site_id,name,region,latitude,longitude,capacity_kw
+gmu_fairfax,George Mason University — Fairfax Campus,DMV,38.8316,-77.3072,250.0
+nova_annandale,NOVA — Annandale Campus,DMV,38.8304,-77.1949,80.0
+nova_alexandria,NOVA — Alexandria Campus,DMV,38.8212,-77.0681,60.0
+nova_loudoun,NOVA — Loudoun Campus,DMV,39.0219,-77.4880,120.0
+nova_manassas,NOVA — Manassas Campus,DMV,38.7515,-77.4866,75.0
+nova_woodbridge,NOVA — Woodbridge Campus,DMV,38.6328,-77.2764,90.0
+dc_community,DC Public/Community Solar (placeholder),DMV,38.9072,-77.0369,500.0
