@@ -1,0 +1,35 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+    environment:
+      - DATA_SOURCE=${DATA_SOURCE:-synthetic}
+      - NREL_API_KEY=${NREL_API_KEY:-DEMO_KEY}
+      - MODEL_DIR=artifacts/models
+      - DATA_PROCESSED_DIR=data/processed
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  dashboard:
+    build: .
+    command: streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+    environment:
+      - DATA_SOURCE=${DATA_SOURCE:-synthetic}
+      - MODEL_DIR=artifacts/models
+      - DATA_PROCESSED_DIR=data/processed
+    depends_on:
+      - api
+    restart: unless-stopped
