@@ -40,6 +40,7 @@ def load_raw_data(
     source: str | None = None,
     output_dir: Path | None = None,
     site_id: str | None = None,
+    demo: bool = False,
 ) -> pd.DataFrame:
     """Download or generate raw solar generation data and save to output_dir.
 
@@ -49,6 +50,9 @@ def load_raw_data(
         site_id:    Optional site ID from config/sites.csv.  When provided, uses
                     site-specific latitude and capacity and caches under a separate
                     file so multiple sites can coexist in the same output_dir.
+        demo:       When True, inject a deterministic underperformance window
+                    (2023-06-15 09:00–12:15) for demo/presentation purposes.
+                    Cached separately so it doesn't overwrite the standard dataset.
 
     Returns DataFrame with columns:
         timestamp, ac_power_kw, irradiance_wm2, temperature_c, wind_speed_ms
@@ -59,8 +63,13 @@ def load_raw_data(
     output_dir = Path(output_dir or settings.data_processed_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Per-site cache so different sites don't overwrite each other
-    cache_name = f"raw_{site_id}.parquet" if site_id else "raw.parquet"
+    # Per-site cache so different sites don't overwrite each other; demo gets its own file
+    if site_id and demo:
+        cache_name = f"raw_{site_id}_demo.parquet"
+    elif site_id:
+        cache_name = f"raw_{site_id}.parquet"
+    else:
+        cache_name = "raw.parquet"
     cache_path = output_dir / cache_name
 
     if cache_path.exists():
@@ -70,7 +79,7 @@ def load_raw_data(
     if source == "nrel":
         df = _fetch_nrel_pvdaq()
     else:
-        df = _generate_synthetic_dispatch(site_id=site_id)
+        df = _generate_synthetic_dispatch(site_id=site_id, demo=demo)
 
     if site_id:
         df["site_id"] = site_id
@@ -130,21 +139,23 @@ def _fetch_nrel_pvdaq() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def _generate_synthetic_dispatch(site_id: str | None) -> pd.DataFrame:
+def _generate_synthetic_dispatch(site_id: str | None, demo: bool = False) -> pd.DataFrame:
     """Route to site-specific or default synthetic generator."""
     if site_id is not None:
         from gridguard.sites.registry import get_site
 
         site = get_site(site_id)
         logger.info(
-            "Generating synthetic data for site '%s' (lat=%.4f, cap=%.0f kW)",
+            "Generating synthetic data for site '%s' (lat=%.4f, cap=%.0f kW)%s",
             site.name,
             site.latitude,
             site.capacity_kw,
+            " [demo mode]" if demo else "",
         )
         return _generate_synthetic(
             latitude=site.latitude,
             system_capacity_kw=site.capacity_kw,
+            demo=demo,
         )
 
     logger.info(
@@ -156,6 +167,7 @@ def _generate_synthetic_dispatch(site_id: str | None) -> pd.DataFrame:
     return _generate_synthetic(
         latitude=_DEFAULT_LATITUDE,
         system_capacity_kw=_DEFAULT_CAPACITY_KW,
+        demo=demo,
     )
 
 
@@ -166,12 +178,15 @@ def _generate_synthetic(
     latitude: float = _DEFAULT_LATITUDE,
     system_capacity_kw: float = _DEFAULT_CAPACITY_KW,
     seed: int = 42,
+    demo: bool = False,
 ) -> pd.DataFrame:
     """Generate physically-motivated 15-minute synthetic solar data.
 
     Args:
         latitude:           Degrees north. Affects sun elevation and seasonal swing.
         system_capacity_kw: AC nameplate capacity of the PV system.
+        demo:               When True, inject a scripted underperformance event at
+                            2023-06-15 09:00–12:15 (70% reduction) for demo purposes.
 
     Model:
       1. Clear-sky irradiance from sun elevation angle at the given latitude.
@@ -179,6 +194,7 @@ def _generate_synthetic(
       3. Temperature with diurnal + seasonal cycle calibrated to ~Northern Virginia.
       4. Panel efficiency drops with temperature (0.4 %/°C above 25°C).
       5. Injected faults: random day-long underperformance events (~5% of days).
+      6. [demo only] Scripted daylight underperformance window on 2023-06-15.
     """
     rng = np.random.default_rng(seed)
     idx = pd.date_range(start, end, freq=freq)
@@ -229,6 +245,22 @@ def _generate_synthetic(
     # Fault reduces output by 40–80%
     fault_severity = rng.uniform(0.2, 0.6, size=n)
     ac_power = np.where(fault_mask, ac_power * fault_severity, ac_power)
+
+    # --- Demo mode: inject a scripted, deterministic underperformance window ---
+    # This is NOT a real fault — it is hardcoded for demo/presentation purposes.
+    # Window: 2023-06-15 09:00–12:15 (13 intervals at 15-min spacing).
+    # Effect: 70% reduction in AC power during peak irradiance hours.
+    if demo:
+        demo_start = pd.Timestamp("2023-06-15 09:00")
+        demo_end = pd.Timestamp("2023-06-15 12:15")
+        demo_mask = (idx >= demo_start) & (idx <= demo_end)
+        ac_power = np.where(demo_mask, ac_power * 0.30, ac_power)
+        fault_mask = fault_mask | np.asarray(demo_mask)
+        logger.info(
+            "Demo mode: injected underperformance at 2023-06-15 09:00–12:15 "
+            "(%d intervals, 70%% reduction)",
+            demo_mask.sum(),
+        )
 
     df = pd.DataFrame(
         {
