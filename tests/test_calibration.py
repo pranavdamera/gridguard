@@ -12,23 +12,19 @@ contaminated by test-set statistics. These tests verify:
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import numpy as np
-import pandas as pd
 import pytest
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from gridguard.anomaly.detect import (
-    compute_and_save_residual_stats,
-    detect_anomalies,
     _compute_residual_stats,
     _load_residual_stats,
+    compute_and_save_residual_stats,
+    detect_anomalies,
 )
-from gridguard.features.engineer import build_features, get_X_y, FEATURE_COLS
+from gridguard.features.engineer import FEATURE_COLS, build_features, get_X_y
 
 
 @pytest.fixture()

@@ -1,15 +1,12 @@
 """Tests for anomaly detection."""
 
-import numpy as np
-import pandas as pd
 import pytest
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from gridguard.anomaly.detect import compute_daily_loss, detect_anomalies
-from gridguard.features.engineer import FEATURE_COLS, build_features, get_X_y
-from gridguard.models.baseline import get_model
+from gridguard.features.engineer import get_X_y
 
 
 @pytest.fixture()

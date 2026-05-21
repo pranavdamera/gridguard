@@ -1,12 +1,9 @@
 """Tests for site registry and site-aware synthetic generation."""
 
-from pathlib import Path
 
-import pandas as pd
 import pytest
 
-from gridguard.sites.registry import get_site, list_site_ids, load_sites, Site
-
+from gridguard.sites.registry import Site, get_site, list_site_ids, load_sites
 
 # ---------------------------------------------------------------------------
 # Registry loading

@@ -1,19 +1,17 @@
 """Tests for stratified model evaluation."""
 
-import numpy as np
-import pandas as pd
 import pytest
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from gridguard.models.evaluate import (
-    evaluate_model,
-    stratified_metrics,
-    full_stratified_report,
-    compare_models,
-)
 from gridguard.features.engineer import get_X_y
+from gridguard.models.evaluate import (
+    compare_models,
+    evaluate_model,
+    full_stratified_report,
+    stratified_metrics,
+)
 
 
 @pytest.fixture()

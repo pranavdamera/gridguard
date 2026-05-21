@@ -4,9 +4,7 @@ These are integration tests that spin up the app with TestClient.
 Models don't need to be pre-loaded — the API handles graceful degradation.
 """
 
-from datetime import datetime
 
-import pytest
 from fastapi.testclient import TestClient
 
 from gridguard.api.main import app
@@ -76,6 +74,18 @@ def test_anomalies_limit_respected():
     if resp.status_code == 200:
         data = resp.json()
         assert len(data["records"]) <= 5
+
+
+def test_events_endpoint():
+    resp = client.get("/events?limit=5")
+    assert resp.status_code in (200, 503)
+    if resp.status_code == 200:
+        data = resp.json()
+        assert "total_events" in data
+        assert "events" in data
+        for ev in data["events"]:
+            assert "explanation" in ev
+            assert isinstance(ev["explanation"], str)
 
 
 def test_docs_available():

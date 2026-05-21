@@ -6,7 +6,6 @@ import pytest
 
 from gridguard.features.engineer import (
     FEATURE_COLS,
-    TARGET_COL,
     build_features,
     get_X_y,
     train_test_split_by_date,

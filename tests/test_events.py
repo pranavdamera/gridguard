@@ -7,8 +7,11 @@ from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from gridguard.anomaly.events import group_anomaly_events, _empty_events_df, GAP_THRESHOLD_MINUTES
 from gridguard.anomaly.detect import detect_anomalies
+from gridguard.anomaly.events import (
+    explain_event_text,
+    group_anomaly_events,
+)
 from gridguard.features.engineer import get_X_y
 
 
@@ -27,7 +30,6 @@ def anomaly_df_fixture():
         }
     )
     # Train a fast model
-    from gridguard.features.engineer import build_features
     model = Pipeline([("sc", StandardScaler()), ("r", Ridge())])
     X, y = get_X_y(df)
     model.fit(X, y)
@@ -44,9 +46,15 @@ def test_required_columns_present(anomaly_df_fixture):
     required = {
         "event_id", "start_time", "end_time", "duration_minutes",
         "interval_count", "total_lost_kwh", "max_residual_sigma",
-        "mean_actual_kw", "mean_predicted_kw", "severity",
+        "mean_actual_kw", "mean_predicted_kw", "severity", "explanation",
     }
     assert required.issubset(set(events.columns))
+
+
+def test_explanation_is_nonempty_string(anomaly_df_fixture):
+    events = group_anomaly_events(anomaly_df_fixture)
+    if not events.empty:
+        assert events["explanation"].apply(lambda s: isinstance(s, str) and len(s) > 0).all()
 
 
 def test_severity_values_valid(anomaly_df_fixture):
@@ -159,3 +167,20 @@ def test_severity_thresholds():
     assert _classify_severity(5.0) == "medium"
     assert _classify_severity(10.0) == "high"
     assert _classify_severity(50.0) == "high"
+
+
+def test_explain_event_text_contains_key_info():
+    event = {
+        "start_time": pd.Timestamp("2023-06-15 09:00"),
+        "duration_minutes": 195,
+        "total_lost_kwh": 23.6,
+        "severity": "high",
+        "mean_predicted_kw": 45.2,
+        "mean_actual_kw": 13.5,
+    }
+    text = explain_event_text(event)
+    assert "23.6 kWh" in text
+    assert "high" in text
+    assert "2023-06-15" in text
+    assert "45.2 kW" in text
+    assert "13.5 kW" in text
