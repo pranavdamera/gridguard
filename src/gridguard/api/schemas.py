@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
-
 
 # ---------------------------------------------------------------------------
 # Forecast endpoint
@@ -67,7 +66,8 @@ class EventRecord(BaseModel):
     mean_actual_kw: float
     mean_predicted_kw: float
     severity: Literal["low", "medium", "high"]
-    site_id: Optional[str] = None
+    explanation: str
+    site_id: str | None = None
 
 
 class EventsResponse(BaseModel):

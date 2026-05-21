@@ -39,9 +39,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from gridguard import __version__
 from gridguard.anomaly.detect import (
-    compute_daily_loss,
-    detect_anomalies,
     _load_residual_stats,
+    detect_anomalies,
 )
 from gridguard.anomaly.events import group_anomaly_events
 from gridguard.api.schemas import (
@@ -131,8 +130,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="GridGuard API",
-    description="Solar asset fault detection and energy forecasting",
+    title="GridGuard DMV API",
+    description=(
+        "Open-source ML system for forecasting solar generation and detecting underperformance "
+        "in DC/Northern Virginia campus-style solar assets. "
+        "GMU, NOVA, and DC sites are illustrative; data is synthetic unless real telemetry is configured."
+    ),
     version=__version__,
     lifespan=lifespan,
 )
@@ -261,6 +264,7 @@ def events(
             mean_actual_kw=round(float(row["mean_actual_kw"]), 4),
             mean_predicted_kw=round(float(row["mean_predicted_kw"]), 4),
             severity=row["severity"],
+            explanation=str(row.get("explanation", "")),
             site_id=row.get("site_id"),
         )
         for _, row in edf.iterrows()
