@@ -12,8 +12,8 @@ Each site row has:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from functools import lru_cache
+from pathlib import Path
 
 import pandas as pd
 
