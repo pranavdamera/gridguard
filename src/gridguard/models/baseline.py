@@ -25,7 +25,6 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBRegressor
 
-
 # ---------------------------------------------------------------------------
 # Persistence baseline
 # ---------------------------------------------------------------------------
@@ -38,7 +37,7 @@ class PersistenceModel(BaseEstimator, RegressorMixin):
     that doesn't clearly beat persistence isn't worth deploying.
     """
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "PersistenceModel":
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> PersistenceModel:
         # Nothing to learn — persistence uses the lag-1 feature directly
         self._lag_col = "ac_power_lag1"
         if self._lag_col not in X.columns:
