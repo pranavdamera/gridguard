@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 
 from gridguard.ingestion.download import load_raw_data
-from gridguard.sites.registry import list_site_ids, load_sites
+from gridguard.sites.registry import load_sites
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Download/generate GridGuard training data")
@@ -44,6 +44,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Print all available site IDs and exit",
     )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Inject a scripted underperformance event at 2023-06-15 09:00–12:15 for demo purposes.",
+    )
     args = parser.parse_args()
 
     if args.list_sites:
@@ -54,7 +59,7 @@ if __name__ == "__main__":
             print(f"{sid:<20}  {s.name:<45}  {s.latitude:>7.4f}  {s.longitude:>8.4f}  {s.capacity_kw:>9.1f}")
         sys.exit(0)
 
-    df = load_raw_data(source=args.source, site_id=args.site_id)
+    df = load_raw_data(source=args.source, site_id=args.site_id, demo=args.demo)
     print(f"\nLoaded {len(df):,} rows  |  columns: {list(df.columns)}")
     print(df.head())
     print(f"\nDate range: {df['timestamp'].min()} → {df['timestamp'].max()}")
