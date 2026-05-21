@@ -1,4 +1,4 @@
-.PHONY: install lint test data train api dashboard clean
+.PHONY: install lint test data train data-gmu train-gmu api dashboard clean
 
 install:
 	pip install -e ".[dev]"
@@ -22,8 +22,16 @@ data-synthetic:
 data-nrel:
 	python scripts/download_data.py --source nrel
 
+# Generate site-specific synthetic data for GMU Fairfax (250 kW, 38.83°N)
+data-gmu:
+	python scripts/download_data.py --source synthetic --site-id gmu_fairfax
+
 train:
 	python scripts/run_pipeline.py
+
+# Train using GMU Fairfax synthetic data
+train-gmu:
+	python scripts/run_pipeline.py --site-id gmu_fairfax
 
 api:
 	uvicorn gridguard.api.main:app --reload --host 0.0.0.0 --port 8000
