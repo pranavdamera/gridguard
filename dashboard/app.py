@@ -37,14 +37,14 @@ from gridguard.config import settings
 from gridguard.features.engineer import get_X_y
 from gridguard.models.evaluate import compare_models, stratified_metrics
 from gridguard.models.train import load_model
-from gridguard.sites.registry import load_sites, list_site_ids
+from gridguard.sites.registry import load_sites
 
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="GridGuard — Solar Fault Detection",
+    page_title="GridGuard DMV — Solar Asset Intelligence",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -136,8 +136,12 @@ with st.sidebar:
 # Main content
 # ---------------------------------------------------------------------------
 
-st.title("⚡ GridGuard — Solar Fault Detection")
-st.caption("Predicts expected generation · Detects underperformance · Estimates lost energy · DMV Region")
+st.title("⚡ GridGuard DMV — Solar Asset Intelligence")
+st.caption(
+    "Forecasts solar generation · Detects underperformance · Estimates lost energy · "
+    "DC / Northern Virginia campus sites · "
+    "Synthetic data unless real telemetry is configured"
+)
 
 test_df, models, _ = load_artifacts()
 
@@ -248,12 +252,20 @@ else:
         "duration_minutes": "Duration (min)", "interval_count": "Intervals",
         "total_lost_kwh": "Lost (kWh)", "max_residual_sigma": "Max σ",
         "mean_actual_kw": "Actual (kW)", "mean_predicted_kw": "Predicted (kW)",
-        "severity": "Severity",
+        "severity": "Severity", "explanation": "Explanation",
     })
-    cols_to_show = ["ID", "Start", "End", "Duration (min)", "Lost (kWh)", "Max σ", "Severity"]
+    cols_to_show = ["ID", "Start", "End", "Duration (min)", "Lost (kWh)", "Max σ", "Severity", "Explanation"]
     if "site_id" in display_events.columns:
         cols_to_show.insert(1, "site_id")
+    # Only include columns that actually exist (explanation added in events.py)
+    cols_to_show = [c for c in cols_to_show if c in display_events.columns]
     st.dataframe(display_events[cols_to_show], use_container_width=True)
+
+    # Show plain-English explanation for the most recent high-severity event
+    high_events = events_df[events_df["severity"] == "high"]
+    if not high_events.empty and "explanation" in high_events.columns:
+        top = high_events.iloc[0]
+        st.info(f"**Most recent high-severity event:** {top['explanation']}")
 
     # Severity breakdown
     sev_counts = events_df["severity"].value_counts().reset_index()
@@ -345,7 +357,7 @@ with exp_col:
         )
         if selected_ts:
             try:
-                from gridguard.features.engineer import build_features, FEATURE_COLS
+                from gridguard.features.engineer import FEATURE_COLS, build_features
 
                 row_df = anomaly_df[anomaly_df["timestamp"] == pd.Timestamp(selected_ts)].head(1).copy()
                 row_df = build_features(row_df)
@@ -397,7 +409,89 @@ fig3 = px.scatter(
 fig3.update_layout(margin=dict(l=0, r=0, t=20, b=0))
 st.plotly_chart(fig3, use_container_width=True)
 
+# ---------------------------------------------------------------------------
+# Section 7: Next-day solar forecast (clear-sky approximation)
+# ---------------------------------------------------------------------------
+
+st.subheader("Next-Day Solar Forecast")
 st.caption(
-    "GridGuard v0.1.0 · DMV Solar Asset Intelligence · "
-    "Portfolio demo — not for production use without validation."
+    "Clear-sky forecast using sun geometry for the site latitude. "
+    "This is a physics-based upper bound, not a weather-aware prediction. "
+    "Actual output will vary with cloud cover."
+)
+
+try:
+    # Derive site latitude: use GMU Fairfax default if no site selected or registry unavailable
+    _site_lat = 38.8316  # GMU Fairfax default
+    _site_cap = 250.0
+    if selected_site:
+        try:
+            from gridguard.sites.registry import get_site as _get_site
+            _s = _get_site(selected_site)
+            _site_lat = _s.latitude
+            _site_cap = _s.capacity_kw
+        except Exception:
+            pass
+
+    # "Tomorrow" = day after the last timestamp in the test set
+    _last_ts = test_df["timestamp"].max()
+    _next_day = (_last_ts + pd.Timedelta(days=1)).normalize()
+    _forecast_idx = pd.date_range(_next_day, periods=96, freq="15min")
+
+    # Clear-sky irradiance using the same sun-geometry model as the synthetic generator
+    _doy = _forecast_idx.day_of_year.values
+    _hour = _forecast_idx.hour.values + _forecast_idx.minute.values / 60
+    _lat_rad = np.radians(_site_lat)
+    _decl = np.radians(23.45 * np.sin(np.radians(360 / 365 * (_doy - 81))))
+    _ha = np.radians(15 * (_hour - 12))
+    _cos_z = np.clip(
+        np.sin(_lat_rad) * np.sin(_decl) + np.cos(_lat_rad) * np.cos(_decl) * np.cos(_ha),
+        0, 1,
+    )
+    _clearsky_irr = np.clip(1000 * _cos_z, 0, 1200)
+
+    # Seasonal temperature for this day of year
+    _temp = 16 + 11 * np.sin(np.radians(360 / 365 * (_doy - 80))) + 5 * np.sin(np.radians(15 * (_hour - 14)))
+
+    # Apply model to predict from clean weather inputs
+    _forecast_df = pd.DataFrame({
+        "timestamp": _forecast_idx,
+        "irradiance_wm2": _clearsky_irr.round(2),
+        "temperature_c": _temp.round(2),
+        "wind_speed_ms": np.full(96, 3.5),
+        "ac_power_kw": np.zeros(96),
+    })
+    from gridguard.features.engineer import build_features as _build_features
+    _forecast_df = _build_features(_forecast_df, include_lags=False)
+    _present = [c for c in FEATURE_COLS if c in _forecast_df.columns]
+    _preds = np.clip(best_model.predict(_forecast_df[_present]), 0, None)
+    _forecast_df["forecast_kw"] = _preds
+
+    _total_kwh = float((_forecast_df["forecast_kw"] * 0.25).sum())
+    _peak_kw = float(_forecast_df["forecast_kw"].max())
+
+    _fc1, _fc2 = st.columns(2)
+    _fc1.metric("Forecasted generation", f"{_total_kwh:.1f} kWh")
+    _fc2.metric("Peak forecast", f"{_peak_kw:.1f} kW")
+
+    _fig_fc = go.Figure()
+    _fig_fc.add_trace(go.Scatter(
+        x=_forecast_df["timestamp"], y=_forecast_df["forecast_kw"],
+        name="Forecast (clear-sky)", line=dict(color=PRED_COLOR, width=2),
+        fill="tozeroy", fillcolor="rgba(52,152,219,0.12)",
+    ))
+    _fig_fc.update_layout(
+        xaxis_title="Time", yaxis_title="Forecast AC Power (kW)",
+        height=300, margin=dict(l=0, r=0, t=10, b=0),
+    )
+    st.plotly_chart(_fig_fc, use_container_width=True)
+
+except Exception as _e:
+    st.warning(f"Could not generate next-day forecast: {_e}")
+
+st.divider()
+
+st.caption(
+    "GridGuard DMV v0.1.0 · DC / Northern Virginia Solar Asset Intelligence · "
+    "Synthetic data unless real telemetry is configured · Not for production use without validation."
 )

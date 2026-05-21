@@ -1,6 +1,7 @@
 """Centralised settings loaded from environment / .env file."""
 
 from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 

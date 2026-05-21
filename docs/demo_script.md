@@ -1,18 +1,24 @@
-# Demo Script
+# GridGuard DMV — Demo Script
 
-A guided walkthrough for showing GridGuard to recruiters, reviewers, or teammates.
-Estimated time: 8–10 minutes.
+A 2–3 minute walkthrough for the GMU Fairfax underperformance scenario.
+Suitable for demo videos, recruiter calls, or peer reviews.
+
+**Honest framing:** All data shown is synthetic. GMU Fairfax is an illustrative site
+(lat 38.83°N, 250 kW nameplate). The underperformance event on 2023-06-15 is scripted.
 
 ---
 
-## Before you start
+## Setup (run before the demo)
 
 ```bash
-# Make sure everything is built and running
 make install
 cp .env.example .env
-make data-synthetic      # ~5 seconds
-make train               # ~60–90 seconds
+
+# Generate GMU Fairfax demo data (deterministic, ~3 seconds)
+python scripts/download_data.py --source synthetic --site-id gmu_fairfax --demo
+
+# Train models (~60–90 seconds)
+python scripts/run_pipeline.py --site-id gmu_fairfax --demo
 
 # Terminal 1 — API
 make api
@@ -27,103 +33,105 @@ Open:
 
 ---
 
-## Talking points
+## Demo flow (~2.5 minutes)
 
-### 1. The problem (30 seconds)
+### 0:00 — One-sentence framing (15 seconds)
 
-> "Solar panels can lose 10–30% of annual output to undetected faults — soiling,
-> partial shading, inverter failures. Utilities and O&M teams often find out weeks
-> later from quarterly reports. GridGuard flags underperformance within 15 minutes."
-
-### 2. Architecture (1 minute)
-
-Point to the dashboard and walk through:
-- **What the model sees**: weather + time features, not the actual output
-- **What it predicts**: expected generation for this site at this moment
-- **How anomalies are flagged**: actual < predicted by > 2σ (training-calibrated)
-- **What an event is**: consecutive flagged intervals grouped together
-
-### 3. Show the dashboard (3 minutes)
-
-1. Point to the **KPI row** — highlight "anomaly events" vs "anomaly intervals"
-2. Scroll to **Actual vs Predicted** chart — point out the X markers on anomaly intervals
-3. Show the **Daily Energy Loss** bar chart — explain the colour is % loss relative to expected
-4. Open **Anomaly Events table** — explain severity tiers (kWh threshold), one row per event
-5. Show **Stratified Metrics** — change from "hour_of_day" to "season" to show seasonal gap
-6. Select an anomalous timestamp in the **Explain panel** — walk through SHAP bar chart
-
-### 4. Show the API (2 minutes)
-
-In the Swagger UI (http://localhost:8000/docs):
-
-1. **GET /health** — show `residual_calibration_loaded: true`
-2. **GET /events** — paste the response, point to `severity: "high"` rows
-3. **POST /forecast** — submit a request:
-   ```json
-   {
-     "timestamp": "2023-07-15T13:00:00",
-     "irradiance_wm2": 850,
-     "temperature_c": 32,
-     "wind_speed_ms": 2.0
-   }
-   ```
-4. **GET /explain** — paste a timestamp from an anomalous interval
-
-### 5. Model comparison (1 minute)
-
-Show the Streamlit model comparison table. Key point:
-
-> "Any model that doesn't beat the persistence baseline — 'predict the same as
-> the last measurement' — isn't worth deploying. XGBoost gets R²=0.98 on this
-> dataset; persistence gets ~0.85."
-
-### 6. Site registry (1 minute)
-
-```bash
-python scripts/download_data.py --list-sites
-```
-
-> "The site registry in `config/sites.csv` means adding a new site is just
-> adding a row. Each site gets its own cache file and latitude-adjusted synthetic
-> data. In production you'd pull from the real inverter API."
-
-### 7. Engineering decisions worth highlighting
-
-If asked to go deeper:
-
-- **Why temporal split not random?** — Random splits on time series let future
-  data leak into training. The model would appear to predict things it already
-  "saw", inflating R² artificially.
-
-- **Why per-hour σ calibration?** — Absolute residuals are 5× larger at noon
-  than at dawn. Without normalisation, the threshold catches noisy midday intervals
-  and misses quiet morning failures.
-
-- **Why is calibration computed from training data only?** — If we calibrated
-  on the test period, the threshold would adapt to that period's characteristics,
-  masking systematic underperformance. This is the same principle as fitting a
-  StandardScaler on training data only.
-
-- **SHAP vs feature importance** — XGBoost's built-in importance counts splits,
-  which is biased toward high-cardinality features. SHAP values are consistent,
-  sum to the prediction, and give per-interval explanations, not just global ranks.
+> "GridGuard DMV is an open-source ML system that forecasts expected solar output
+> for campus-scale PV systems, detects underperformance, and explains the events
+> in plain English. I'll show it on a scripted GMU Fairfax scenario."
 
 ---
 
-## Questions to be ready for
+### 0:15 — KPI row (20 seconds)
 
-**"Is this production-ready?"**
-> No — and I'm explicit about that in the model card and README. The main gaps
-> are: trained on synthetic data, no streaming ingestion, single-site, no
-> coverage-guaranteed prediction intervals. Each of these is a concrete next step.
+Point to the header metrics:
 
-**"How would you handle real-time data?"**
-> Replace the batch pipeline with a streaming loop: an MQTT/REST listener ingests
-> inverter data every 15 minutes, calls `/forecast`, computes the residual, and
-> calls `/events` to update the event log. The model itself doesn't change.
+- **Anomaly events** — grouped continuous underperformance periods
+- **Lost energy (kWh)** — modelled energy that should have been generated
+- **Best RMSE** — model accuracy against withheld test data
 
-**"How do you know the anomaly detector is working?"**
-> On synthetic data, I inject faults on 5% of days and measure recall. The test
-> in `test_anomaly.py::test_injected_faults_detected` asserts that fault days
-> have a higher anomaly rate than normal days. For real data you'd need labelled
-> fault events from maintenance logs.
+> "The key number here is lost energy — that's what an O&M team would use to
+> prioritise which sites to dispatch a crew to."
+
+---
+
+### 0:35 — Anomaly Events table (45 seconds)
+
+Scroll to the **Anomaly Events** table:
+
+1. Find the row for **2023-06-15** — this is the scripted underperformance event
+2. Point to the **Severity: high** badge
+3. Read the **Explanation** column aloud:
+
+> "During this 3h 15min event on 2023-06-15, the model expected 45 kW average
+> output but actual generation was 13 kW — 70% below forecast.
+> Estimated lost energy: ~23 kWh. Severity: high."
+
+> "The explanation is auto-generated from the model's residuals — no manual
+> annotation needed."
+
+---
+
+### 1:20 — Actual vs Predicted chart (30 seconds)
+
+Scroll to **Actual vs Predicted Generation**:
+
+> "The X markers are flagged intervals. You can see the model tracked actual
+> output closely on clear days, but when the fault hit on June 15th the actual
+> line drops sharply while the forecast stays up — that gap is the lost energy."
+
+---
+
+### 1:50 — Next-Day Forecast panel (20 seconds)
+
+Scroll to **Next-Day Solar Forecast**:
+
+> "This panel shows a clear-sky upper-bound forecast for the next 24 hours.
+> It's not weather-aware yet — that would come from NSRDB or a weather API —
+> but it gives the operator a baseline to compare against when real readings
+> start arriving."
+
+---
+
+### 2:10 — API (20 seconds)
+
+Switch to http://localhost:8000/docs:
+
+1. **GET /events** → expand a `severity: "high"` record → point to `explanation` field
+2. **GET /health** → show `residual_calibration_loaded: true`
+
+> "Every event the API returns includes a human-readable explanation string —
+> same content as the dashboard, consumable by any downstream notification system."
+
+---
+
+### 2:30 — Wrap-up (30 seconds)
+
+> "The full pipeline runs with `make data-gmu && make train-gmu`. Adding a new
+> site is one row in `config/sites.csv`. The next steps for a real deployment
+> would be connecting real inverter telemetry, adding NSRDB irradiance, and
+> swapping the residual threshold for conformal prediction intervals to get
+> a coverage guarantee on the alert rate."
+
+---
+
+## Key talking points (if asked to go deeper)
+
+**Why temporal split not random?**
+Random splits let future data leak into training, inflating R² artificially.
+
+**Why per-hour σ calibration?**
+Residuals are 5× larger at noon than at dawn. Normalising by hour means
+a morning fault doesn't need to match a midday threshold.
+
+**Why calibration from training data only?**
+Same principle as fitting a StandardScaler on training data — calibrating
+on the test period would mask systematic underperformance in that window.
+
+**Is this production-ready?**
+No — explicitly noted in the model card and README. Main gaps: synthetic data,
+no streaming ingestion, single-site model, no coverage-guaranteed intervals.
+Each is a concrete next step, not a hand-wave.
+
+**Demo event timestamp:** 2023-06-15 09:00 – 12:15 (scripted, 70% reduction)
