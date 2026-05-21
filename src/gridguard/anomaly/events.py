@@ -25,7 +25,6 @@ TODO: Parameterise severity thresholds by site capacity_kw.
 from __future__ import annotations
 
 import pandas as pd
-import numpy as np
 
 INTERVAL_MINUTES = 15
 GAP_THRESHOLD_MINUTES = 20  # gaps larger than this break event continuity
@@ -85,9 +84,12 @@ def group_anomaly_events(anomaly_df: pd.DataFrame) -> pd.DataFrame:
     # Re-assign event_ids as sequential integers (most-recent = 1)
     events["event_id"] = range(1, len(events) + 1)
 
+    # Plain-English explanation for each event
+    events["explanation"] = events.apply(explain_event_text, axis=1)
+
     cols = ["event_id", "start_time", "end_time", "duration_minutes",
             "interval_count", "total_lost_kwh", "max_residual_sigma",
-            "mean_actual_kw", "mean_predicted_kw", "severity"]
+            "mean_actual_kw", "mean_predicted_kw", "severity", "explanation"]
     if "site_id" in events.columns:
         cols.append("site_id")
 
@@ -102,11 +104,47 @@ def _classify_severity(lost_kwh: float) -> str:
     return "high"
 
 
+def explain_event_text(event: pd.Series | dict) -> str:
+    """Return a plain-English summary of an anomaly event.
+
+    Example output:
+        "During this 3h 15min event on 2023-06-15, the model expected 45.2 kW
+        average output but actual generation was 13.5 kW — 70% below forecast.
+        Estimated lost energy: 23.6 kWh. Severity: high."
+    """
+    duration = int(event["duration_minutes"])
+    lost = float(event["total_lost_kwh"])
+    severity = str(event["severity"])
+    predicted = float(event["mean_predicted_kw"])
+    actual = float(event["mean_actual_kw"])
+
+    # Format duration
+    if duration >= 60:
+        h, m = divmod(duration, 60)
+        dur_str = f"{h}h {m}min" if m else f"{h}h"
+    else:
+        dur_str = f"{duration}min"
+
+    # Date string from start_time
+    try:
+        date_str = f" on {pd.Timestamp(event['start_time']).strftime('%Y-%m-%d')}"
+    except Exception:
+        date_str = ""
+
+    pct_drop = round(100 * (1 - actual / predicted)) if predicted > 0 else 0
+
+    return (
+        f"During this {dur_str} event{date_str}, the model expected {predicted:.1f} kW "
+        f"average output but actual generation was {actual:.1f} kW — {pct_drop}% below forecast. "
+        f"Estimated lost energy: {lost:.1f} kWh. Severity: {severity}."
+    )
+
+
 def _empty_events_df() -> pd.DataFrame:
     return pd.DataFrame(
         columns=[
             "event_id", "start_time", "end_time", "duration_minutes",
             "interval_count", "total_lost_kwh", "max_residual_sigma",
-            "mean_actual_kw", "mean_predicted_kw", "severity",
+            "mean_actual_kw", "mean_predicted_kw", "severity", "explanation",
         ]
     )
