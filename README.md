@@ -25,24 +25,6 @@ or SCADA feed to use real data.
 
 ---
 
-## ML skills demonstrated
-
-| Skill | Where |
-|---|---|
-| Time-series feature engineering | `features/engineer.py` — cyclic encodings, lag features, rolling stats |
-| Temporal train/test splitting | Prevents future leakage; standard for TS problems |
-| Model benchmarking pipeline | Persistence → Linear → RF → XGBoost, same eval harness |
-| Residual-based anomaly detection | Per-hour sigma calibration from training split only |
-| SHAP explainability | `explainability/shap_explain.py` — global + per-alert breakdown |
-| ML system design | FastAPI serving layer, Pydantic schemas, artifact management |
-| Evaluation discipline | MAE, RMSE, MAPE, R², skill score vs persistence |
-| Plain-English event explanations | Human-readable summaries on every anomaly event |
-| Reproducible pipelines | `make train` runs end-to-end from data to artifacts |
-| Containerisation | Dockerfile + docker-compose for API + dashboard |
-| Testing ML code | pytest for feature transforms, anomaly logic, API contracts |
-
----
-
 ## Architecture
 
 ```
@@ -116,15 +98,15 @@ Synthetic data is a physics simulation, not real measured output from these camp
 
 ## What is real vs simulated
 
-| Component | Status |
-|---|---|
-| Site IDs, names, region | Real institution names (illustrative only) |
-| Coordinates, capacity_kw | Approximate estimates from public records |
-| Solar generation data | **Synthetic** — physics simulation, not measured |
-| Sun geometry, seasonal swing | Physically motivated (latitude-parameterised) |
-| Fault events | **Injected** at ~5% of training days with known labels |
+| Component                       | Status                                                           |
+| ------------------------------- | ---------------------------------------------------------------- |
+| Site IDs, names, region         | Real institution names (illustrative only)                       |
+| Coordinates, capacity_kw        | Approximate estimates from public records                        |
+| Solar generation data           | **Synthetic** — physics simulation, not measured                 |
+| Sun geometry, seasonal swing    | Physically motivated (latitude-parameterised)                    |
+| Fault events                    | **Injected** at ~5% of training days with known labels           |
 | GMU demo underperformance event | **Scripted** — see [Deterministic demo](#deterministic-gmu-demo) |
-| NREL PVDAQ option | Real data (requires free API key) |
+| NREL PVDAQ option               | Real data (requires free API key)                                |
 
 ---
 
@@ -225,6 +207,7 @@ python scripts/run_pipeline.py --site-id gmu_fairfax --demo
 ```
 
 **Scripted underperformance event:**
+
 - **Site:** GMU Fairfax (250 kW, 38.83°N)
 - **Date:** 2023-06-15 (clear summer day)
 - **Window:** 09:00 – 12:15 local time (13 intervals, ~3.25 hours)
@@ -239,23 +222,23 @@ Anomaly Events table with `severity: high`.
 
 ## Commands
 
-| Command | Description |
-|---|---|
-| `make install` | Install all dependencies |
-| `make data-synthetic` | Generate 2 years of generic synthetic solar data |
-| `make data-gmu` | Generate site-specific synthetic data for GMU Fairfax |
-| `make data-nrel` | Download real NREL PVDAQ data (requires API key) |
-| `make train` | Run full training pipeline (generic data) |
-| `make train-gmu` | Train models using GMU Fairfax synthetic data |
-| `make api` | Start FastAPI server |
-| `make dashboard` | Start Streamlit dashboard |
-| `make test` | Run pytest suite with coverage |
-| `make lint` | Run ruff + black check |
-| `make format` | Auto-fix lint issues |
-| `make docker-up` | Start API + dashboard via Docker |
-| `python scripts/download_data.py --list-sites` | Print the DMV site registry |
-| `python scripts/download_data.py --site-id gmu_fairfax` | Generate site-specific data |
-| `python scripts/download_data.py --site-id gmu_fairfax --demo` | Generate deterministic demo data |
+| Command                                                        | Description                                           |
+| -------------------------------------------------------------- | ----------------------------------------------------- |
+| `make install`                                                 | Install all dependencies                              |
+| `make data-synthetic`                                          | Generate 2 years of generic synthetic solar data      |
+| `make data-gmu`                                                | Generate site-specific synthetic data for GMU Fairfax |
+| `make data-nrel`                                               | Download real NREL PVDAQ data (requires API key)      |
+| `make train`                                                   | Run full training pipeline (generic data)             |
+| `make train-gmu`                                               | Train models using GMU Fairfax synthetic data         |
+| `make api`                                                     | Start FastAPI server                                  |
+| `make dashboard`                                               | Start Streamlit dashboard                             |
+| `make test`                                                    | Run pytest suite with coverage                        |
+| `make lint`                                                    | Run ruff + black check                                |
+| `make format`                                                  | Auto-fix lint issues                                  |
+| `make docker-up`                                               | Start API + dashboard via Docker                      |
+| `python scripts/download_data.py --list-sites`                 | Print the DMV site registry                           |
+| `python scripts/download_data.py --site-id gmu_fairfax`        | Generate site-specific data                           |
+| `python scripts/download_data.py --site-id gmu_fairfax --demo` | Generate deterministic demo data                      |
 
 ---
 
@@ -264,11 +247,13 @@ Anomaly Events table with `severity: high`.
 After `make api`, docs are at http://localhost:8000/docs
 
 **GET /health**
+
 ```json
-{"status": "ok", "model_loaded": true, "data_rows": 17520, "version": "0.1.0"}
+{ "status": "ok", "model_loaded": true, "data_rows": 17520, "version": "0.1.0" }
 ```
 
 **POST /forecast**
+
 ```json
 {
   "timestamp": "2023-07-15T14:00:00",
@@ -277,11 +262,13 @@ After `make api`, docs are at http://localhost:8000/docs
   "wind_speed_ms": 2.5
 }
 ```
+
 ```json
-{"timestamp": "...", "predicted_kw": 7.84, "model_name": "xgboost"}
+{ "timestamp": "...", "predicted_kw": 7.84, "model_name": "xgboost" }
 ```
 
 **GET /events?limit=20**
+
 ```json
 {
   "total_events": 18,
@@ -342,16 +329,16 @@ See [docs/model_card.md](docs/model_card.md) for the full model card.
 
 ## Stack
 
-| Layer | Library |
-|---|---|
-| Data | pandas, numpy, pyarrow |
-| ML | scikit-learn, xgboost |
-| Explainability | shap |
-| API | fastapi, uvicorn, pydantic |
-| Dashboard | streamlit, plotly |
-| Config | pydantic-settings, python-dotenv |
-| Infra | Docker, docker-compose |
-| Dev | pytest, ruff, black, make |
+| Layer          | Library                          |
+| -------------- | -------------------------------- |
+| Data           | pandas, numpy, pyarrow           |
+| ML             | scikit-learn, xgboost            |
+| Explainability | shap                             |
+| API            | fastapi, uvicorn, pydantic       |
+| Dashboard      | streamlit, plotly                |
+| Config         | pydantic-settings, python-dotenv |
+| Infra          | Docker, docker-compose           |
+| Dev            | pytest, ruff, black, make        |
 
 ---
 
