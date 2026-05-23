@@ -125,3 +125,23 @@ class HealthResponse(BaseModel):
     data_rows: int
     version: str
     residual_calibration_loaded: bool
+
+
+# ---------------------------------------------------------------------------
+# Sites endpoint
+# ---------------------------------------------------------------------------
+
+
+class SiteRecord(BaseModel):
+    site_id: str
+    name: str
+    region: str
+    latitude: float
+    longitude: float
+    capacity_kw: float
+    notes: str = ""
+
+
+class SitesResponse(BaseModel):
+    sites: list[SiteRecord]
+    total: int
