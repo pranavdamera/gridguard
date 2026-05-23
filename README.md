@@ -25,6 +25,23 @@ or SCADA feed to use real data.
 
 ---
 
+## Why it matters
+
+Campus energy managers and solar O&M teams need to know:
+- **Did the system underperform today, and how much energy was lost?**
+- **Is the deviation a real fault or just a cloudy afternoon?**
+- **Which site in the fleet needs attention first?**
+
+GridGuard addresses this by learning what a *healthy* system should produce given the weather, then flagging deviations that exceed a calibrated threshold. The pipeline is designed to connect to real inverter telemetry (SCADA, NREL PVDAQ, or a simple CSV) without structural changes.
+
+Relevant real-world contexts:
+- **Campus energy management** — universities tracking solar contribution to net-zero goals
+- **Solar O&M** — fault triage and lost revenue estimation across a distributed fleet
+- **DER visibility** — aggregating rooftop solar for grid operators who need generation visibility
+- **Energy resilience** — detecting degradation before it becomes a critical outage
+
+---
+
 ## Architecture
 
 ```
@@ -157,7 +174,7 @@ gridguard/
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/YOUR_USERNAME/gridguard.git
+git clone https://github.com/pranav-damera/gridguard.git
 cd gridguard
 python -m venv .venv && source .venv/bin/activate
 make install
@@ -292,6 +309,59 @@ After `make api`, docs are at http://localhost:8000/docs
 
 ---
 
+## ML approach
+
+### Two feature modes
+
+GridGuard distinguishes two feature sets for different modelling goals:
+
+| Mode | Purpose | Allowed features |
+|---|---|---|
+| `weather_only` | Expected-generation baseline / anomaly detection | Weather, time, site metadata. No actual-power lags. |
+| `lag_aware` | Short-horizon operational forecasting | All weather + time features + `ac_power_lag1`, `ac_power_lag4` |
+
+**Why the distinction matters:** If you train an anomaly detector with lag features, a system that has been degraded for days produces low power → lag₁ is low → the model learns to predict low → the degradation is invisible. The `weather_only` mode forces the model to answer "what should a healthy system produce given today's weather?" independently of recent observed output.
+
+```python
+# Weather-only model for anomaly detection (avoids masking persistent faults)
+from gridguard.features.engineer import get_X_y
+X_train, y_train = get_X_y(train_df, mode="weather_only")
+
+# Lag-aware model for next-interval operational forecast
+X_train, y_train = get_X_y(train_df, mode="lag_aware")
+```
+
+### Models
+
+| Model | Notes |
+|---|---|
+| Persistence (lag-1) | Naive baseline — predicts next interval = previous interval |
+| Linear (Ridge) | Regularised linear baseline on all features |
+| RandomForest | Ensemble, handles non-linear irradiance × temperature interactions |
+| XGBoost | Best performer; used for anomaly detection and API by default |
+
+All models use a **temporal train/test split** (not random). Random splits leak future information into training, inflating R² artificially.
+
+### Anomaly detection
+
+The default detector uses **residual sigma thresholding** calibrated on training data:
+
+```
+flag if:  (actual - predicted) < -k × σ_hour
+```
+
+where `σ_hour` is the per-hour residual standard deviation estimated from the training split only. Using training-set stats prevents test-period degradation from contaminating the threshold.
+
+A **conformal lower prediction bound** is implemented in `anomaly/conformal.py` as the principled next step. It provides a coverage guarantee: at miscoverage level α, at most α × n+1 calibration points fall below the bound. See `docs/modeling.md` for details.
+
+### Explainability
+
+SHAP values are computed for the XGBoost model, attributing each prediction to specific features. The `/explain` API endpoint returns the top contributors for any flagged interval.
+
+See [docs/modeling.md](docs/modeling.md) for full model design rationale.
+
+---
+
 ## Limitations
 
 This is a portfolio and learning project. Be explicit about what it is not:
@@ -311,19 +381,40 @@ See [docs/model_card.md](docs/model_card.md) for the full model card.
 
 ---
 
+## How to run tests
+
+```bash
+# From repo root (no PYTHONPATH required — pytest.ini sets pythonpath = ["src"])
+pytest
+
+# With coverage
+pytest --cov=gridguard --cov-report=term-missing
+```
+
+---
+
 ## Roadmap
 
-- [ ] NSRDB integration — real irradiance data from NREL's National Solar Radiation Database
-- [ ] OpenEI building load — add campus load profiles to model net metering impact
-- [ ] PJM grid context — regional dispatch signals and day-ahead LMP as features
-- [ ] Conformal prediction intervals — replace sigma thresholding with coverage-guaranteed intervals
-- [ ] LightGBM comparison — add to model zoo
+**Real data ingestion**
+- [ ] NSRDB integration — real irradiance/weather from NREL's National Solar Radiation Database (`/api/solar/nsrdb_psm3`)
+- [ ] PJM Data Miner integration — regional LMP and dispatch signals as grid-context features
+- [ ] PVDAQ/OEDI ingestion — real PV generation records from NREL Open Energy Data Initiative
+
+**ML improvements**
+- [ ] Conformal prediction intervals — replace sigma thresholding with coverage-guaranteed bounds (`anomaly/conformal.py` foundation is ready)
+- [ ] Weather-only model as default anomaly baseline — train separate XGBoost on `mode="weather_only"` features
+- [ ] Event-level precision/recall evaluation — need labeled fault datasets
+- [ ] pvlib clear-sky model — physics-based GHI as a feature (currently using simplified sun geometry)
 - [ ] PyTorch LSTM baseline — sequence model on sliding windows
-- [ ] Multi-site fleet view — parameterise by site_id, aggregate fleet-level metrics
+- [ ] Degradation trend detection — slow long-term output decline via residual trend
+
+**System / demo**
+- [ ] Multi-site fleet aggregation — cross-site metrics and correlation
 - [ ] Live data mode — poll a real inverter API, run forecast + anomaly in real time
-- [ ] Email/Slack alerts — notify when high-severity event is detected
-- [ ] pvlib clear-sky model — physics-based irradiance as feature
-- [ ] Degradation trend — detect slow long-term output decline via residual trend
+- [ ] Email/Slack alerts — notify when high-severity event detected
+- [ ] pvlib integration — replace custom sun geometry with well-tested pvlib computations
+
+See [docs/research_angle.md](docs/research_angle.md) for the research collaboration context.
 
 ---
 
