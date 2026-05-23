@@ -6,12 +6,12 @@ We locate it by walking up from this file's location so it works
 regardless of the current working directory.
 
 Each site row has:
-  site_id, name, region, latitude, longitude, capacity_kw
+  site_id, name, region, latitude, longitude, capacity_kw[, notes]
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
@@ -29,6 +29,7 @@ class Site:
     latitude: float
     longitude: float
     capacity_kw: float
+    notes: str = field(default="")
 
 
 @lru_cache(maxsize=1)
@@ -46,6 +47,7 @@ def load_sites(csv_path: Path | None = None) -> dict[str, Site]:
             latitude=float(row["latitude"]),
             longitude=float(row["longitude"]),
             capacity_kw=float(row["capacity_kw"]),
+            notes=str(row.get("notes", "") or ""),
         )
         for _, row in df.iterrows()
     }
@@ -62,3 +64,19 @@ def get_site(site_id: str, csv_path: Path | None = None) -> Site:
 
 def list_site_ids(csv_path: Path | None = None) -> list[str]:
     return sorted(load_sites(csv_path).keys())
+
+
+def sites_as_records(csv_path: Path | None = None) -> list[dict]:
+    """Return all sites as a list of plain dicts (JSON-serialisable)."""
+    return [
+        {
+            "site_id": s.site_id,
+            "name": s.name,
+            "region": s.region,
+            "latitude": s.latitude,
+            "longitude": s.longitude,
+            "capacity_kw": s.capacity_kw,
+            "notes": s.notes,
+        }
+        for s in load_sites(csv_path).values()
+    ]
