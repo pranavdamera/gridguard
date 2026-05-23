@@ -129,7 +129,7 @@ with st.sidebar:
     st.code(settings.data_source, language=None)
     st.markdown("**Links**")
     st.markdown("- [API docs](http://localhost:8000/docs)")
-    st.markdown("- [GitHub](https://github.com/YOUR_USERNAME/gridguard)")
+    st.markdown("- [GitHub](https://github.com/pranav-damera/gridguard)")
 
 
 # ---------------------------------------------------------------------------
@@ -488,6 +488,95 @@ try:
 
 except Exception as _e:
     st.warning(f"Could not generate next-day forecast: {_e}")
+
+# ---------------------------------------------------------------------------
+# Section 8: Fleet map
+# ---------------------------------------------------------------------------
+
+st.subheader("Fleet Map — DMV Site Overview")
+st.caption(
+    "Site locations, capacities, and illustrative health status. "
+    "Coordinates are approximate estimates from public records."
+)
+
+try:
+    sites_dict = load_sites()
+
+    # Build per-site health summary from anomaly data if available
+    site_lost: dict[str, float] = {}
+    if "site_id" in anomaly_df.columns:
+        site_lost = (
+            anomaly_df.groupby("site_id")["lost_energy_kwh"].sum().to_dict()
+        )
+
+    map_rows = []
+    for s in sites_dict.values():
+        lost = site_lost.get(s.site_id, 0.0)
+        # Simple severity label for hover display
+        if lost > 10:
+            status = "High loss"
+        elif lost > 1:
+            status = "Medium loss"
+        else:
+            status = "Normal"
+        map_rows.append({
+            "site_id": s.site_id,
+            "name": s.name,
+            "latitude": s.latitude,
+            "longitude": s.longitude,
+            "capacity_kw": s.capacity_kw,
+            "lost_kwh": round(lost, 2),
+            "status": status,
+        })
+
+    map_df = pd.DataFrame(map_rows)
+
+    status_color = {"High loss": "red", "Medium loss": "orange", "Normal": "green"}
+
+    fig_map = px.scatter_geo(
+        map_df,
+        lat="latitude",
+        lon="longitude",
+        text="site_id",
+        size="capacity_kw",
+        color="status",
+        color_discrete_map=status_color,
+        hover_name="name",
+        hover_data={
+            "capacity_kw": True,
+            "lost_kwh": True,
+            "status": True,
+            "latitude": False,
+            "longitude": False,
+        },
+        scope="usa",
+        title="DMV Solar Fleet (illustrative sites, synthetic data)",
+        height=440,
+    )
+    fig_map.update_geos(
+        center={"lat": 38.85, "lon": -77.2},
+        projection_scale=12,
+        showland=True,
+        landcolor="rgb(240, 240, 240)",
+        showcoastlines=True,
+        coastlinecolor="rgb(180, 180, 180)",
+        showstates=True,
+        statecolor="rgb(200, 200, 200)",
+    )
+    fig_map.update_layout(margin=dict(l=0, r=0, t=40, b=0), legend_title_text="Status")
+    st.plotly_chart(fig_map, use_container_width=True)
+
+    # Summary table
+    st.dataframe(
+        map_df.rename(columns={
+            "site_id": "Site ID", "name": "Name", "capacity_kw": "Capacity (kW)",
+            "lost_kwh": "Est. Lost (kWh)", "status": "Status",
+        })[["Site ID", "Name", "Capacity (kW)", "Est. Lost (kWh)", "Status"]],
+        use_container_width=True,
+    )
+
+except Exception as _map_err:
+    st.warning(f"Fleet map unavailable: {_map_err}")
 
 st.divider()
 
