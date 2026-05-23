@@ -55,6 +55,8 @@ from gridguard.api.schemas import (
     HealthResponse,
     MetricsResponse,
     ModelMetrics,
+    SiteRecord,
+    SitesResponse,
 )
 from gridguard.config import settings
 from gridguard.features.engineer import FEATURE_COLS, build_features
@@ -355,6 +357,31 @@ def explain(
         model_name=model_name,
         shap_available=shap_available,
     )
+
+
+@app.get("/sites", response_model=SitesResponse)
+def sites_endpoint():
+    """Return all configured DMV sites with geospatial metadata.
+
+    Useful for building fleet map views or filtering dashboard data by site.
+    Capacities and coordinates are approximate estimates from public records.
+    """
+    from gridguard.sites.registry import load_sites
+
+    sites_dict = load_sites()
+    records = [
+        SiteRecord(
+            site_id=s.site_id,
+            name=s.name,
+            region=s.region,
+            latitude=s.latitude,
+            longitude=s.longitude,
+            capacity_kw=s.capacity_kw,
+            notes=s.notes,
+        )
+        for s in sites_dict.values()
+    ]
+    return SitesResponse(sites=records, total=len(records))
 
 
 @app.get("/metrics", response_model=MetricsResponse)
