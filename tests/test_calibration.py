@@ -142,7 +142,7 @@ def test_detect_anomalies_freeze_false_does_not_load_file(simple_model_and_split
 
     det_mod._load_residual_stats = patched_load
     try:
-        result = detect_anomalies(test_df, model, freeze=False)
+        detect_anomalies(test_df, model, freeze=False)
     finally:
         det_mod._load_residual_stats = original_load
 
