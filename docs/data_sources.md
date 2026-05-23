@@ -40,7 +40,43 @@ https://developer.nrel.gov/docs/solar/pvdaq-v3/
 
 **Note:** The DEMO_KEY has rate limits. For large downloads get a personal key.
 
-### 3. Open Power System Data (future)
+### 3. NREL NSRDB — National Solar Radiation Database (future)
+
+High-resolution (4 km, 30-min) satellite-derived solar resource data for the US.
+
+- API: `https://developer.nrel.gov/api/solar/nsrdb_psm3_download.json`
+- Variables: GHI, DNI, DHI, temperature, wind speed, cloud type
+- Coverage: 1998–present (updated annually)
+- Free with NREL API key; bulk download limits apply
+
+**Why this matters for GridGuard:** The current synthetic generator approximates sun
+geometry from latitude alone. NSRDB provides measured irradiance at each site location,
+which would improve the `weather_only` expected-generation model significantly —
+especially for cloudy days and winter periods where the simple geometric model diverges
+from reality.
+
+**Integration path:** Add `nsrdb` source to `load_raw_data()`. The PSM3 API returns
+a CSV with standardised column names that would map cleanly to GridGuard's schema.
+
+### 4. PJM Data Miner — Grid Context (future)
+
+PJM operates the wholesale electricity market for DC, Maryland, Virginia, and 12 other
+states. Real-time and day-ahead LMP (locational marginal price) data is publicly available.
+
+- URL: `https://dataminer2.pjm.com/`
+- API: REST, no authentication required for public data
+- Variables: LMP ($/MWh) by node and 5-min interval; load forecasts; interchange
+
+**Why this matters for GridGuard:** LMP transforms "23 kWh lost" into "23 kWh × $85/MWh
+= $2 of lost revenue." During peak-price hours, a fault is economically 5–10× more
+impactful than during off-peak. Integrating LMP makes severity rankings actionable for
+energy managers, not just O&M teams.
+
+**Integration path:** Add a `pjm_lmp` module that fetches 5-min LMP for the nearest
+node to each site, joins by timestamp, and adds `lmp_dollar_per_mwh` to the anomaly
+DataFrame. Update `compute_daily_loss()` to compute `lost_revenue_usd`.
+
+### 5. Open Power System Data (future)
 
 Hourly national solar generation for European countries (Germany, France, GB, etc.).
 

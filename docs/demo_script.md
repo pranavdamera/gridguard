@@ -94,7 +94,20 @@ Scroll to **Next-Day Solar Forecast**:
 
 ---
 
-### 2:10 — API (20 seconds)
+### 2:05 — Fleet Map (20 seconds)
+
+Scroll to **Fleet Map — DMV Site Overview**:
+
+> "The fleet map shows all seven illustrative DMV sites — GMU, NOVA campuses, and
+> DC Community Solar — with size proportional to capacity. Green sites are operating
+> normally; red indicates estimated energy loss. In a real deployment, this would update
+> every 15 minutes as telemetry comes in."
+
+Point to the site summary table below the map.
+
+---
+
+### 2:25 — API (20 seconds)
 
 Switch to http://localhost:8000/docs:
 
