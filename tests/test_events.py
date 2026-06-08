@@ -29,9 +29,9 @@ def anomaly_df_fixture():
             "wind_speed_ms": np.abs(rng.normal(3, 1, 200)),
         }
     )
-    # Train a fast model
+    # Train with weather_only features — matches the anomaly detection pipeline
     model = Pipeline([("sc", StandardScaler()), ("r", Ridge())])
-    X, y = get_X_y(df)
+    X, y = get_X_y(df, mode="weather_only")
     model.fit(X, y)
     return detect_anomalies(df, model, freeze=False)
 

@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     # API
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    allowed_origins: str = "http://localhost:3000"  # comma-separated, or "*"
 
 
 settings = Settings()

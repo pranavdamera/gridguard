@@ -106,8 +106,9 @@ def main():
     logger.info("=== Step 4: Anomaly detection ===")
     from gridguard.anomaly.detect import compute_daily_loss, detect_anomalies
 
-    best_model = results["models"][best["model"]]
-    adf = detect_anomalies(results["test_df"], best_model)
+    # Use the weather-only anomaly_detector, not the lag-aware forecast model
+    anomaly_model = results["anomaly_model"]
+    adf = detect_anomalies(results["test_df"], anomaly_model)
     daily = compute_daily_loss(adf)
     total_loss = daily["lost_energy_kwh"].sum()
     fault_days = (daily["anomaly_count"] > 0).sum()

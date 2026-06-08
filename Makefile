@@ -1,4 +1,4 @@
-.PHONY: install lint test data train data-gmu train-gmu api dashboard clean
+.PHONY: install lint test data train data-gmu train-gmu api dashboard web demo-reset clean
 
 install:
 	pip install -e ".[dev]"
@@ -39,12 +39,25 @@ api:
 dashboard:
 	streamlit run dashboard/app.py --server.port 8501
 
-# Run API + dashboard concurrently (requires tmux or run in separate terminals)
+web:
+	cd web && npm run dev
+
+# Regenerate deterministic demo bundle (data + models + artifacts) from scratch
+demo-reset:
+	python scripts/reset_demo.py
+
+# Run API + frontend (requires separate terminals or tmux)
 demo:
-	@echo "Start API:       make api"
-	@echo "Start dashboard: make dashboard"
-	@echo "API docs:        http://localhost:8000/docs"
-	@echo "Dashboard:       http://localhost:8501"
+	@echo "Run in separate terminals:"
+	@echo "  make demo-reset   (once, to generate artifacts)"
+	@echo "  make api          (FastAPI backend)"
+	@echo "  make web          (Next.js frontend)"
+	@echo "  make dashboard    (Streamlit research dashboard)"
+	@echo ""
+	@echo "  API docs:         http://localhost:8000/docs"
+	@echo "  Public frontend:  http://localhost:3000"
+	@echo "  Demo endpoint:    http://localhost:8000/demo/scenario"
+	@echo "  Dashboard:        http://localhost:8501"
 
 docker-build:
 	docker compose build

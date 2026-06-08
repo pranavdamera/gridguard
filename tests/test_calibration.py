@@ -19,17 +19,21 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from gridguard.anomaly.detect import (
+    ANOMALY_FEATURE_COLS,
     _compute_residual_stats,
     _load_residual_stats,
     compute_and_save_residual_stats,
     detect_anomalies,
 )
-from gridguard.features.engineer import FEATURE_COLS, build_features, get_X_y
+from gridguard.features.engineer import WEATHER_ONLY_FEATURES, build_features, get_X_y
 
 
 @pytest.fixture()
 def simple_model_and_splits(tmp_path):
-    """Return (model, train_df, test_df) with distinct distributions."""
+    """Return (model, train_df, test_df) with distinct distributions.
+
+    Model is trained with weather_only features — matching the anomaly pipeline.
+    """
     from gridguard.ingestion.download import _generate_synthetic
 
     full_df = _generate_synthetic(start="2022-01-01", end="2023-06-30", seed=1)
@@ -37,7 +41,7 @@ def simple_model_and_splits(tmp_path):
     test_df = full_df[full_df["timestamp"] >= "2023-01-01"].copy()
 
     model = Pipeline([("sc", StandardScaler()), ("r", Ridge())])
-    X_train, y_train = get_X_y(train_df)
+    X_train, y_train = get_X_y(train_df, mode="weather_only")
     model.fit(X_train, y_train)
 
     return model, train_df, test_df
@@ -82,8 +86,8 @@ def test_frozen_stats_differ_from_self_computed(simple_model_and_splits, tmp_pat
     compute_and_save_residual_stats(train_df, model, model_dir=tmp_path)
 
     frozen_stats = _load_residual_stats(tmp_path)
-    test_feat = build_features(test_df.copy())
-    present = [c for c in FEATURE_COLS if c in test_feat.columns]
+    test_feat = build_features(test_df.copy(), include_lags=False)
+    present = [c for c in ANOMALY_FEATURE_COLS if c in test_feat.columns]
     test_feat["predicted_kw"] = np.clip(model.predict(test_feat[present]), 0, None)
     test_feat["residual_kw"] = test_feat["ac_power_kw"] - test_feat["predicted_kw"]
     daylight = test_feat["irradiance_wm2"] > 50
@@ -155,9 +159,10 @@ def test_residual_stats_only_use_training_rows(simple_model_and_splits, tmp_path
     compute_and_save_residual_stats(train_df, model, model_dir=tmp_path)
     frozen = _load_residual_stats(tmp_path)
 
-    # Manual recomputation from training split
-    train_feat = build_features(train_df.copy())
-    present = [c for c in FEATURE_COLS if c in train_feat.columns]
+    # Manual recomputation from training split — must use weather_only features
+    # to match what compute_and_save_residual_stats actually does
+    train_feat = build_features(train_df.copy(), include_lags=False)
+    present = [c for c in ANOMALY_FEATURE_COLS if c in train_feat.columns]
     train_feat["predicted_kw"] = np.clip(model.predict(train_feat[present]), 0, None)
     train_feat["residual_kw"] = train_feat["ac_power_kw"] - train_feat["predicted_kw"]
     daylight = train_feat["irradiance_wm2"] > 50

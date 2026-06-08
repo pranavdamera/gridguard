@@ -179,37 +179,61 @@ cd gridguard
 python -m venv .venv && source .venv/bin/activate
 make install
 
-# 2. Copy env file
+# Also install frontend dependencies
+cd web && npm install && cd ..
+
+# 2. Copy env files
 cp .env.example .env
+cp web/.env.example web/.env.local
 
-# 3. Generate synthetic data and train
-make data-synthetic
-make train
+# 3. Reset demo — generates all artifacts deterministically (run once)
+make demo-reset
 
-# 4. Start the API
+# 4. Start backend (terminal 1)
 make api
 # → http://localhost:8000/docs
 
-# 5. Start the dashboard (new terminal)
+# 5. Start Next.js frontend (terminal 2)
+make web
+# → http://localhost:3000
+
+# 6. (Optional) Start Streamlit research dashboard (terminal 3)
 make dashboard
 # → http://localhost:8501
 ```
 
 ---
 
-## GMU Fairfax demo workflow
+## Repo structure
 
-```bash
-# Generate site-specific synthetic data for GMU Fairfax (250 kW system, 38.83°N)
-make data-gmu
-
-# Train models on GMU data
-make train-gmu
-
-# Start API and dashboard
-make api
-make dashboard
 ```
+gridguard/
+├── web/                         # Next.js public frontend (TypeScript + Tailwind)
+│   ├── app/
+│   │   ├── page.tsx             # Landing page
+│   │   ├── demo/page.tsx        # Main demo dashboard
+│   │   ├── sites/[siteId]/      # Site detail
+│   │   ├── events/[eventId]/    # Event drilldown
+│   │   └── methodology/         # Transparent model docs
+│   ├── components/              # Reusable dashboard components
+│   └── lib/api.ts               # API client wrapper
+├── scripts/
+│   ├── reset_demo.py            # One-step deterministic demo reset
+│   ├── download_data.py         # CLI: --source, --site-id, --demo
+│   └── run_pipeline.py          # CLI: end-to-end training pipeline
+├── src/gridguard/
+│   └── api/main.py              # FastAPI — /health /sites /events /demo/scenario …
+├── dashboard/app.py             # Streamlit research dashboard
+├── docs/
+│   ├── methodology.md           # Feature modes, leakage, anomaly detection
+│   ├── deployment.md            # Vercel + Render/Railway deployment
+│   └── demo_script.md           # 2-min demo walkthrough
+└── tests/                       # 92 pytest tests
+```
+
+---
+
+## GMU Fairfax demo workflow
 
 ---
 

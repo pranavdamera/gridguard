@@ -145,3 +145,19 @@ class SiteRecord(BaseModel):
 class SitesResponse(BaseModel):
     sites: list[SiteRecord]
     total: int
+
+
+# ---------------------------------------------------------------------------
+# Demo scenario endpoint
+# ---------------------------------------------------------------------------
+
+
+class DemoScenarioResponse(BaseModel):
+    data_label: str
+    demo_date: str
+    site_id: str
+    site_name: str
+    event: EventRecord | None = None
+    anomaly_records: list[AnomalyRecord]
+    jump_to_event_id: int | None = None
+    recommended_actions: list[str]

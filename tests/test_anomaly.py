@@ -1,5 +1,6 @@
 """Tests for anomaly detection."""
 
+import numpy as np
 import pytest
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
@@ -11,14 +12,17 @@ from gridguard.features.engineer import get_X_y
 
 @pytest.fixture()
 def trained_model_and_df():
-    """Train a fast linear model on synthetic data for use in anomaly tests."""
+    """Train a weather-only linear model on synthetic data for anomaly tests.
+
+    Uses mode="weather_only" — matching the anomaly detection pipeline.
+    Lag features must NOT be used here; see docs/methodology.md.
+    """
     from gridguard.ingestion.download import _generate_synthetic
 
     df = _generate_synthetic(start="2022-01-01", end="2022-03-31", seed=99)
 
-    # Use a fast linear model to avoid slow RF/XGB in tests
     model = Pipeline([("scaler", StandardScaler()), ("reg", Ridge())])
-    X, y = get_X_y(df)
+    X, y = get_X_y(df, mode="weather_only")
     model.fit(X, y)
     return model, df
 
@@ -74,14 +78,29 @@ def test_compute_daily_loss_structure(trained_model_and_df):
     assert (daily["lost_energy_kwh"] >= 0).all()
 
 
-def test_injected_faults_detected(trained_model_and_df):
-    """Injected fault days in synthetic data should have higher anomaly counts."""
-    model, df = trained_model_and_df
-    result = detect_anomalies(df, model, threshold_sigma=1.5)
+def test_injected_faults_detected():
+    """Injected fault days should have higher anomaly rates when model was not trained on them.
 
-    if "is_injected_fault" not in result.columns:
+    Trains on one random seed, evaluates on another so the model is genuinely
+    surprised by the fault-day patterns (different fault days chosen by each seed).
+    """
+    from gridguard.ingestion.download import _generate_synthetic
+
+    # Train on seed=0 — fault days are different from the test seed
+    # mode="weather_only" — matches the anomaly detection pipeline
+    df_train = _generate_synthetic(start="2022-01-01", end="2022-03-31", seed=0)
+    model = Pipeline([("scaler", StandardScaler()), ("reg", Ridge())])
+    X, y = get_X_y(df_train, mode="weather_only")
+    model.fit(X, y)
+
+    # Evaluate on seed=99 — has its own (different) fault days
+    df_test = _generate_synthetic(start="2022-01-01", end="2022-03-31", seed=99)
+
+    if "is_injected_fault" not in df_test.columns:
         pytest.skip("Injected fault labels not present")
 
+    # freeze=False: compute residual stats from test df (no saved artifact dependency)
+    result = detect_anomalies(df_test, model, threshold_sigma=1.5, freeze=False)
     result["date"] = result["timestamp"].dt.date
     fault_days = result[result["is_injected_fault"]]["date"].unique()
     normal_days = result[~result["is_injected_fault"]]["date"].unique()
@@ -92,3 +111,48 @@ def test_injected_faults_detected(trained_model_and_df):
     assert fault_anom_rate > normal_anom_rate, (
         f"Fault detection rate ({fault_anom_rate:.2%}) not higher than normal ({normal_anom_rate:.2%})"
     )
+
+
+# ---------------------------------------------------------------------------
+# No-lag guarantee tests — these are the credibility proofs
+# ---------------------------------------------------------------------------
+
+
+def test_weather_only_features_exclude_lag_columns():
+    """ANOMALY_FEATURE_COLS must never include lag features.
+
+    This is the core correctness property of the anomaly detection pipeline.
+    A lag-aware model would learn that a degraded system producing low output
+    has low lags → predicts low → residual is small → fault is missed.
+    """
+    from gridguard.anomaly.detect import ANOMALY_FEATURE_COLS
+
+    assert "ac_power_lag1" not in ANOMALY_FEATURE_COLS, (
+        "ac_power_lag1 must NOT be in the anomaly feature set"
+    )
+    assert "ac_power_lag4" not in ANOMALY_FEATURE_COLS, (
+        "ac_power_lag4 must NOT be in the anomaly feature set"
+    )
+
+
+def test_detect_anomalies_does_not_pass_lag_columns_to_model(trained_model_and_df):
+    """Verify detect_anomalies only passes weather/time columns to model.predict."""
+    model, df = trained_model_and_df
+
+    seen_columns: list[list[str]] = []
+    original_predict = model.predict
+
+    def recording_predict(X):
+        seen_columns.append(list(X.columns))
+        return original_predict(X)
+
+    model.predict = recording_predict
+    try:
+        detect_anomalies(df, model, freeze=False)
+    finally:
+        model.predict = original_predict
+
+    assert seen_columns, "model.predict should have been called"
+    all_cols = {c for batch in seen_columns for c in batch}
+    assert "ac_power_lag1" not in all_cols, "lag1 must not reach model.predict"
+    assert "ac_power_lag4" not in all_cols, "lag4 must not reach model.predict"

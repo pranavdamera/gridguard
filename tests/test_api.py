@@ -91,3 +91,75 @@ def test_events_endpoint():
 def test_docs_available():
     resp = client.get("/docs")
     assert resp.status_code == 200
+
+
+def test_sites_endpoint():
+    resp = client.get("/sites")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "sites" in data
+    assert data["total"] > 0
+    for s in data["sites"]:
+        assert "site_id" in s
+        assert "latitude" in s
+        assert "longitude" in s
+        assert "capacity_kw" in s
+
+
+def test_site_detail_endpoint():
+    resp = client.get("/sites/gmu_fairfax")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["site_id"] == "gmu_fairfax"
+    assert "capacity_kw" in data
+
+
+def test_site_detail_not_found():
+    resp = client.get("/sites/nonexistent_site_xyz")
+    assert resp.status_code == 404
+
+
+def test_events_severity_filter():
+    for sev in ("low", "medium", "high"):
+        resp = client.get(f"/events?severity={sev}")
+        assert resp.status_code in (200, 503)
+    resp = client.get("/events?severity=invalid")
+    # 400 if events are loaded, 503 if artifacts not present (CI without artifacts)
+    assert resp.status_code in (400, 503)
+
+
+def test_events_by_id():
+    # events list to find a valid id
+    list_resp = client.get("/events?limit=1")
+    if list_resp.status_code == 200 and list_resp.json()["events"]:
+        eid = list_resp.json()["events"][0]["event_id"]
+        resp = client.get(f"/events/{eid}")
+        assert resp.status_code == 200
+        assert resp.json()["event_id"] == eid
+
+
+def test_events_by_id_not_found():
+    resp = client.get("/events/999999")
+    assert resp.status_code in (404, 503)
+
+
+def test_demo_scenario_endpoint():
+    resp = client.get("/demo/scenario")
+    assert resp.status_code in (200, 503)
+    if resp.status_code == 200:
+        data = resp.json()
+        assert "data_label" in data
+        assert "demo_date" in data
+        assert "recommended_actions" in data
+        assert isinstance(data["recommended_actions"], list)
+
+
+def test_forecast_get_endpoint():
+    resp = client.get("/forecast?limit=5")
+    assert resp.status_code in (200, 503)
+    if resp.status_code == 200:
+        data = resp.json()
+        assert isinstance(data, list)
+        for item in data:
+            assert "predicted_kw" in item
+            assert item["predicted_kw"] >= 0

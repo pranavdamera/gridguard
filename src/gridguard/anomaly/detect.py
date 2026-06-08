@@ -40,7 +40,13 @@ import numpy as np
 import pandas as pd
 
 from gridguard.config import settings
-from gridguard.features.engineer import FEATURE_COLS, build_features
+from gridguard.features.engineer import WEATHER_ONLY_FEATURES, build_features
+
+# Anomaly detection always uses weather-only features.
+# Lag features must never appear here — a degraded system produces low lags,
+# which would cause a lag-aware model to predict low output as "normal" and
+# hide persistent underperformance. See docs/methodology.md for details.
+ANOMALY_FEATURE_COLS = WEATHER_ONLY_FEATURES
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +79,9 @@ def detect_anomalies(
         df with anomaly columns added.
     """
     threshold_sigma = threshold_sigma or settings.anomaly_threshold_sigma
-    df = build_features(df.copy())
+    df = build_features(df.copy(), include_lags=False)
 
-    present_cols = [c for c in FEATURE_COLS if c in df.columns]
+    present_cols = [c for c in ANOMALY_FEATURE_COLS if c in df.columns]
     df["predicted_kw"] = np.clip(model.predict(df[present_cols]), 0, None)
 
     # Only evaluate during daylight (irradiance > 50 W/m² avoids dawn noise)
@@ -160,8 +166,8 @@ def compute_and_save_residual_stats(
     model_dir = Path(model_dir or settings.model_dir)
     model_dir.mkdir(parents=True, exist_ok=True)
 
-    train_feat = build_features(train_df.copy())
-    present_cols = [c for c in FEATURE_COLS if c in train_feat.columns]
+    train_feat = build_features(train_df.copy(), include_lags=False)
+    present_cols = [c for c in ANOMALY_FEATURE_COLS if c in train_feat.columns]
     train_feat["predicted_kw"] = np.clip(model.predict(train_feat[present_cols]), 0, None)
     train_feat["residual_kw"] = train_feat["ac_power_kw"] - train_feat["predicted_kw"]
 
