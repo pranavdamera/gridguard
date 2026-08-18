@@ -11,15 +11,22 @@ Algorithm:
      or timestamp gaps > 20 min).
   3. Aggregate per event_id.
 
-Severity tiers (based on total_lost_kwh):
-  low    — < 1 kWh
-  medium — 1–10 kWh
-  high   — > 10 kWh
+Severity
+--------
+Severity is the **fraction of expected generation lost** during the event, not
+an absolute kWh figure. An absolute threshold is meaningless across a fleet
+spanning 60 kW to 500 kW: 10 kWh lost is a rounding error for a 500 kW field and
+a total outage for a 60 kW roof.
 
-These thresholds are illustrative. Tune them based on system capacity.
+  high    >= 50% of expected generation lost
+  medium  >= 20%
+  low     below that
 
-TODO: Add spatial grouping across sites for fleet-level event correlation.
-TODO: Parameterise severity thresholds by site capacity_kw.
+A small absolute floor still applies so that a fractionally-large but
+energetically-trivial blip at dawn is not escalated.
+
+Fleet-level correlation of events across sites is handled separately, in
+:mod:`gridguard.spatial.context`.
 """
 
 from __future__ import annotations
@@ -29,18 +36,49 @@ import pandas as pd
 INTERVAL_MINUTES = 15
 GAP_THRESHOLD_MINUTES = 20  # gaps larger than this break event continuity
 
+#: Consecutive flagged intervals required before a run becomes an event.
+#:
+#: This matters more than it looks. The conformal detector is *designed* to flag
+#: alpha (5%) of healthy intervals — that is what the coverage guarantee means.
+#: Promoting every isolated flag to an event therefore yields roughly one
+#: "event" per twenty healthy daylight intervals, burying real faults under
+#: hundreds of single-interval blips.
+#:
+#: Requiring persistence converts a per-interval false-positive rate into a far
+#: lower per-event one: for roughly independent intervals, three in a row occurs
+#: at about alpha^3. Physically it is also the right filter — a passing cloud
+#: edge produces one bad interval, whereas an inverter fault, soiling, or
+#: shading persists. Genuine faults comfortably exceed 45 minutes; the cost is
+#: that a true fault shorter than that is not reported as an event, though its
+#: intervals remain flagged in the anomaly feed.
+MIN_EVENT_INTERVALS = 3
 
-def group_anomaly_events(anomaly_df: pd.DataFrame) -> pd.DataFrame:
+#: Fraction of expected generation lost that escalates an event.
+HIGH_SHORTFALL_FRACTION = 0.50
+MEDIUM_SHORTFALL_FRACTION = 0.20
+
+#: Events losing less than this are capped at "low" regardless of fraction,
+#: so a near-total shortfall of almost no energy is not called critical.
+MIN_MATERIAL_LOSS_KWH = 0.5
+
+
+def group_anomaly_events(
+    anomaly_df: pd.DataFrame,
+    min_intervals: int = MIN_EVENT_INTERVALS,
+) -> pd.DataFrame:
     """Group consecutive anomaly intervals into events.
 
     Args:
-        anomaly_df: Output of detect_anomalies() — must have columns
-                    timestamp, is_anomaly, ac_power_kw, predicted_kw,
-                    residual_sigma, lost_energy_kwh.
+        anomaly_df:    Output of detect_anomalies() — must have columns
+                       timestamp, is_anomaly, ac_power_kw, predicted_kw,
+                       residual_sigma, lost_energy_kwh.
+        min_intervals: Consecutive flagged intervals required to report an
+                       event. See :data:`MIN_EVENT_INTERVALS` for why this
+                       defaults above 1.
 
     Returns:
         DataFrame with one row per event, sorted by start_time descending.
-        Empty DataFrame (correct schema) if there are no anomalies.
+        Empty DataFrame (correct schema) if there are no qualifying events.
     """
     anom = anomaly_df[anomaly_df["is_anomaly"]].copy()
     anom = anom.sort_values("timestamp").reset_index(drop=True)
@@ -53,19 +91,35 @@ def group_anomaly_events(anomaly_df: pd.DataFrame) -> pd.DataFrame:
     boundary = (ts_diff > GAP_THRESHOLD_MINUTES) | ts_diff.isna()
     anom["event_id"] = boundary.cumsum().astype(int)
 
-    events = (
-        anom.groupby("event_id")
-        .agg(
-            start_time=("timestamp", "min"),
-            end_time=("timestamp", "max"),
-            interval_count=("timestamp", "count"),
-            total_lost_kwh=("lost_energy_kwh", "sum"),
-            max_residual_sigma=("residual_sigma", lambda s: s.abs().max()),
-            mean_actual_kw=("ac_power_kw", "mean"),
-            mean_predicted_kw=("predicted_kw", "mean"),
-        )
-        .reset_index()
+    # Drop runs too short to be distinguishable from the detector's designed
+    # false-positive rate.
+    if min_intervals > 1:
+        run_lengths = anom.groupby("event_id")["event_id"].transform("size")
+        anom = anom[run_lengths >= min_intervals]
+        if anom.empty:
+            return _empty_events_df()
+
+    aggregations = {
+        "start_time": ("timestamp", "min"),
+        "end_time": ("timestamp", "max"),
+        "interval_count": ("timestamp", "count"),
+        "total_lost_kwh": ("lost_energy_kwh", "sum"),
+        "max_residual_sigma": ("residual_sigma", lambda s: s.abs().max()),
+        "mean_actual_kw": ("ac_power_kw", "mean"),
+        "mean_predicted_kw": ("predicted_kw", "mean"),
+    }
+    if "expected_lower_kw" in anom.columns:
+        aggregations["mean_expected_lower_kw"] = ("expected_lower_kw", "mean")
+
+    events = anom.groupby("event_id").agg(**aggregations).reset_index()
+
+    # Expected energy over the event, used to express severity as a fraction.
+    events["expected_kwh"] = (
+        events["mean_predicted_kw"] * events["interval_count"] * INTERVAL_MINUTES / 60
     )
+    events["shortfall_fraction"] = (
+        events["total_lost_kwh"] / events["expected_kwh"].where(events["expected_kwh"] > 0)
+    ).fillna(0.0)
 
     # Duration = from start of first interval to end of last interval
     events["duration_minutes"] = (
@@ -77,7 +131,12 @@ def group_anomaly_events(anomaly_df: pd.DataFrame) -> pd.DataFrame:
         .astype(int)
     )
 
-    events["severity"] = events["total_lost_kwh"].apply(_classify_severity)
+    events["severity"] = [
+        _classify_severity(lost, fraction)
+        for lost, fraction in zip(
+            events["total_lost_kwh"], events["shortfall_fraction"], strict=True
+        )
+    ]
 
     # Add site_id if present in source
     if "site_id" in anomaly_df.columns:
@@ -98,24 +157,35 @@ def group_anomaly_events(anomaly_df: pd.DataFrame) -> pd.DataFrame:
         "duration_minutes",
         "interval_count",
         "total_lost_kwh",
+        "expected_kwh",
+        "shortfall_fraction",
         "max_residual_sigma",
         "mean_actual_kw",
         "mean_predicted_kw",
         "severity",
         "explanation",
     ]
+    if "mean_expected_lower_kw" in events.columns:
+        cols.insert(cols.index("mean_predicted_kw") + 1, "mean_expected_lower_kw")
     if "site_id" in events.columns:
         cols.append("site_id")
 
     return events[cols]
 
 
-def _classify_severity(lost_kwh: float) -> str:
-    if lost_kwh < 1.0:
+def _classify_severity(lost_kwh: float, shortfall_fraction: float) -> str:
+    """Severity from the fraction of expected generation lost.
+
+    Capacity-independent by construction: a fraction is comparable across a
+    60 kW roof and a 500 kW field, where an absolute kWh threshold is not.
+    """
+    if lost_kwh < MIN_MATERIAL_LOSS_KWH:
         return "low"
-    elif lost_kwh < 10.0:
+    if shortfall_fraction >= HIGH_SHORTFALL_FRACTION:
+        return "high"
+    if shortfall_fraction >= MEDIUM_SHORTFALL_FRACTION:
         return "medium"
-    return "high"
+    return "low"
 
 
 def explain_event_text(event: pd.Series | dict) -> str:
@@ -147,10 +217,19 @@ def explain_event_text(event: pd.Series | dict) -> str:
 
     pct_drop = round(100 * (1 - actual / predicted)) if predicted > 0 else 0
 
+    bound_clause = ""
+    lower = event.get("mean_expected_lower_kw") if hasattr(event, "get") else None
+    if lower is not None and pd.notna(lower):
+        bound_clause = (
+            f" The calibrated lower bound of healthy output was {float(lower):.1f} kW, so actual "
+            f"generation fell outside the expected range rather than merely below the point "
+            f"forecast."
+        )
+
     return (
         f"During this {dur_str} event{date_str}, the model expected {predicted:.1f} kW "
-        f"average output but actual generation was {actual:.1f} kW — {pct_drop}% below forecast. "
-        f"Estimated lost energy: {lost:.1f} kWh. Severity: {severity}."
+        f"average output but actual generation was {actual:.1f} kW — {pct_drop}% below forecast."
+        f"{bound_clause} Estimated lost energy: {lost:.1f} kWh. Severity: {severity}."
     )
 
 
@@ -163,9 +242,12 @@ def _empty_events_df() -> pd.DataFrame:
             "duration_minutes",
             "interval_count",
             "total_lost_kwh",
+            "expected_kwh",
+            "shortfall_fraction",
             "max_residual_sigma",
             "mean_actual_kw",
             "mean_predicted_kw",
+            "mean_expected_lower_kw",
             "severity",
             "explanation",
         ]

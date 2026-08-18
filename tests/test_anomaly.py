@@ -16,9 +16,9 @@ def trained_model_and_df():
     Uses mode="weather_only" — matching the anomaly detection pipeline.
     Lag features must NOT be used here; see docs/methodology.md.
     """
-    from gridguard.ingestion.download import _generate_synthetic
+    from tests._helpers import make_frame
 
-    df = _generate_synthetic(start="2022-01-01", end="2022-03-31", seed=99)
+    df = make_frame(start="2022-01-01", end="2022-03-31", seed=99)
 
     model = Pipeline([("scaler", StandardScaler()), ("reg", Ridge())])
     X, y = get_X_y(df, mode="weather_only")
@@ -83,17 +83,17 @@ def test_injected_faults_detected():
     Trains on one random seed, evaluates on another so the model is genuinely
     surprised by the fault-day patterns (different fault days chosen by each seed).
     """
-    from gridguard.ingestion.download import _generate_synthetic
+    from tests._helpers import make_frame
 
     # Train on seed=0 — fault days are different from the test seed
     # mode="weather_only" — matches the anomaly detection pipeline
-    df_train = _generate_synthetic(start="2022-01-01", end="2022-03-31", seed=0)
+    df_train = make_frame(start="2022-01-01", end="2022-03-31", seed=0, inject_scenario=True)
     model = Pipeline([("scaler", StandardScaler()), ("reg", Ridge())])
     X, y = get_X_y(df_train, mode="weather_only")
     model.fit(X, y)
 
     # Evaluate on seed=99 — has its own (different) fault days
-    df_test = _generate_synthetic(start="2022-01-01", end="2022-03-31", seed=99)
+    df_test = make_frame(start="2022-01-01", end="2022-03-31", seed=99, inject_scenario=True)
 
     if "is_injected_fault" not in df_test.columns:
         pytest.skip("Injected fault labels not present")

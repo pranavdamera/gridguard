@@ -34,9 +34,9 @@ def simple_model_and_splits(tmp_path):
 
     Model is trained with weather_only features — matching the anomaly pipeline.
     """
-    from gridguard.ingestion.download import _generate_synthetic
+    from tests._helpers import make_frame
 
-    full_df = _generate_synthetic(start="2022-01-01", end="2023-06-30", seed=1)
+    full_df = make_frame(start="2022-01-01", end="2023-06-30", seed=1)
     train_df = full_df[full_df["timestamp"] < "2023-01-01"].copy()
     test_df = full_df[full_df["timestamp"] >= "2023-01-01"].copy()
 

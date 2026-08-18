@@ -1,0 +1,45 @@
+{
+  "generated_at": "2026-08-18T17:02:43+00:00",
+  "datasets": [
+    {
+      "site_id": "nist_roof",
+      "data_mode": "real",
+      "dataset": "NREL PVDAQ (Open Energy Data Initiative data lake)",
+      "system_identifier": "PVDAQ system_id=4903",
+      "site_name": "NIST Gaithersburg \u2014 Building Roof",
+      "latitude": 39.1354,
+      "longitude": -77.2156,
+      "elevation_m": 149.0,
+      "capacity_kw": 73.7,
+      "capacity_basis": "DC nameplate (published system metadata)",
+      "tilt_deg": 10.0,
+      "azimuth_deg": 180.0,
+      "interval_minutes": 15,
+      "native_interval_minutes": 1,
+      "start": "2016-01-01 00:00:00",
+      "end": "2016-12-31 23:45:00",
+      "timezone_note": "Local standard time at a fixed UTC-5 offset, derived from the published measured_on and utc_measured_on columns. The offset is constant across the range, confirming no daylight-saving shift.",
+      "row_count": 34663,
+      "weather_source": "Instruments co-located with the array (published in the same PVDAQ record)",
+      "irradiance_kind": "plane-of-array",
+      "irradiance_channel": "RefCell1_Wm2_Avg (metric_id=82699, W/m^2)",
+      "irradiance_scale_factor": 1.0,
+      "irradiance_scale_basis": "Published in W/m^2 with calc_scale=1, calc_offset=0. Validated against a pvlib Ineichen clear-sky model transposed to the sensor's plane-of-array (tilt 10\u00b0, azimuth 180\u00b0) reference: 95th-percentile clear-sky index 1.07 (a calibrated sensor sits near 1.0).",
+      "source_url": "https://openei.org/wiki/PVDAQ",
+      "license_note": "NREL PVDAQ data published via the Open Energy Data Initiative (OEDI) as a public dataset. Attribution to NREL/OEDI required; consult the dataset landing page for current terms before redistribution.",
+      "retrieved_at": "2026-08-18T17:02:43+00:00",
+      "processing_notes": [
+        "Channels selected from the system metrics table by declared units: ac_power=InvPAC_kW_Avg (metric_id=82728, kW); irradiance=RefCell1_Wm2_Avg (metric_id=82699, W/m^2) [plane-of-array]; temperature=AmbTemp_C_Avg (metric_id=82702, C); wind_speed=WindSpeedAve_ms (metric_id=82777, m/s)",
+        "Resampled from 1-minute to 15-minute intervals by mean.",
+        "Negative irradiance and power (instrument offsets) clamped to zero.",
+        "Assembled 516867 native samples into 34663 usable intervals.",
+        "473 intervals (1.35%) remained missing after short-gap interpolation and were dropped rather than imputed."
+      ],
+      "known_limitations": [
+        "No fault labels. Measured telemetry carries no annotated failures, so this dataset supports forecast evaluation only \u2014 detection metrics come from injected scenarios instead.",
+        "Where several calibrated irradiance sensors exist, the lowest metric_id is used; alternates are not cross-checked, so a drifting sensor would go unnoticed.",
+        "Irradiance channels published only in raw millivolts are rejected rather than converted, since the dataset does not publish the instrument calibration constant."
+      ]
+    }
+  ]
+}

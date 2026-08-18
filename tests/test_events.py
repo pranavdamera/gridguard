@@ -166,15 +166,30 @@ def test_total_lost_kwh_sums_correctly():
     assert abs(events.iloc[0]["total_lost_kwh"] - 6.0) < 0.01
 
 
-def test_severity_thresholds():
-    """Check severity classification boundaries."""
+def test_severity_is_driven_by_shortfall_fraction():
+    """Severity reflects the fraction of expected generation lost, not raw kWh.
+
+    An absolute threshold cannot work across a fleet spanning 60 kW to 500 kW:
+    10 kWh is a rounding error for one and a total outage for the other.
+    """
     from gridguard.anomaly.events import _classify_severity
 
-    assert _classify_severity(0.5) == "low"
-    assert _classify_severity(1.0) == "medium"
-    assert _classify_severity(5.0) == "medium"
-    assert _classify_severity(10.0) == "high"
-    assert _classify_severity(50.0) == "high"
+    # Same absolute loss, very different meaning.
+    assert _classify_severity(10.0, 0.60) == "high"
+    assert _classify_severity(10.0, 0.30) == "medium"
+    assert _classify_severity(10.0, 0.05) == "low"
+
+    # Boundaries.
+    assert _classify_severity(5.0, 0.50) == "high"
+    assert _classify_severity(5.0, 0.20) == "medium"
+    assert _classify_severity(5.0, 0.19) == "low"
+
+
+def test_energetically_trivial_events_are_never_escalated():
+    """A near-total shortfall of almost no energy is not a critical event."""
+    from gridguard.anomaly.events import _classify_severity
+
+    assert _classify_severity(0.1, 0.95) == "low"
 
 
 def test_explain_event_text_contains_key_info():

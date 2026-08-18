@@ -14,8 +14,14 @@ Why SHAP over simple feature importance?
   SHAP values are game-theoretically grounded: each feature's contribution is
   consistent and sums exactly to (prediction − baseline).
 
-TODO: Add SHAP dependence plots (irradiance vs SHAP) to show non-linearity.
-TODO: Extend to RandomForest via TreeExplainer (works the same way).
+What a SHAP explanation is and is not
+-------------------------------------
+These values explain the **model's expectation**, not the fault. A large
+negative contribution from ``irradiance_wm2`` means the model expected less
+output because irradiance was low — it says nothing about why the array then
+underperformed that already-reduced expectation. Attribution of the *deviation*
+is a separate question, handled spatially in
+:mod:`gridguard.spatial.context`.
 """
 
 from __future__ import annotations
@@ -92,3 +98,54 @@ def explain_anomaly(
                 }
             )
     return pd.DataFrame(rows)
+
+
+def explain_interval(
+    detected: pd.DataFrame,
+    model,
+    timestamp: str,
+    top_n: int = 6,
+) -> list[dict]:
+    """Top SHAP contributors to the expected generation at one interval.
+
+    Returns a list of dicts shaped for :class:`~gridguard.api.schemas.ExplainContributor`.
+    Returns an empty list when SHAP is unavailable or the timestamp is not
+    present, so callers can degrade gracefully rather than fail a whole response.
+    """
+    if not SHAP_AVAILABLE:
+        return []
+
+    from gridguard.features.engineer import WEATHER_ONLY_FEATURES, build_features
+
+    frame = detected.copy()
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"])
+    target = pd.Timestamp(timestamp)
+
+    # Nearest interval at or after the requested time; events start on an
+    # interval boundary but callers may pass an arbitrary instant.
+    candidates = frame[frame["timestamp"] >= target]
+    if candidates.empty:
+        return []
+    row = candidates.sort_values("timestamp").iloc[[0]]
+
+    features = build_features(row, include_lags=False)
+    columns = [c for c in WEATHER_ONLY_FEATURES if c in features.columns]
+    X = features[columns]
+
+    try:
+        explainer = shap.TreeExplainer(model)
+        values = np.asarray(explainer.shap_values(X))[0]
+    except Exception as exc:
+        logger.debug("SHAP explanation failed: %s", exc)
+        return []
+
+    order = np.argsort(np.abs(values))[::-1][:top_n]
+    return [
+        {
+            "feature": columns[j],
+            "feature_value": round(float(X.iloc[0, j]), 4),
+            "shap_value": round(float(values[j]), 4),
+            "direction": "positive" if values[j] >= 0 else "negative",
+        }
+        for j in order
+    ]

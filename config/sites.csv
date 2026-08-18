@@ -1,8 +1,11 @@
-site_id,name,region,latitude,longitude,capacity_kw,notes
-gmu_fairfax,George Mason University — Fairfax Campus,DMV,38.8316,-77.3072,250.0,Estimated from campus sustainability reports
-nova_annandale,NOVA — Annandale Campus,DMV,38.8304,-77.1949,80.0,Illustrative estimate
-nova_alexandria,NOVA — Alexandria Campus,DMV,38.8212,-77.0681,60.0,Illustrative estimate
-nova_loudoun,NOVA — Loudoun Campus,DMV,39.0219,-77.4880,120.0,Illustrative estimate
-nova_manassas,NOVA — Manassas Campus,DMV,38.7515,-77.4866,75.0,Illustrative estimate
-nova_woodbridge,NOVA — Woodbridge Campus,DMV,38.6328,-77.2764,90.0,Illustrative estimate
-dc_community,DC Public/Community Solar (placeholder),DMV,38.9072,-77.0369,500.0,Placeholder for DC community solar aggregation
+site_id,name,region,data_mode,latitude,longitude,elevation_m,capacity_kw,capacity_basis,tilt_deg,azimuth_deg,source_system_id,notes
+nist_ground,NIST Gaithersburg — Ground Array,DMV,real,39.1319,-77.2141,138.0,270.7,DC nameplate (published system metadata),20.0,180.0,4902,"Measured telemetry. NREL PVDAQ system 4902 via the OEDI data lake. 1152 Sharp NU-U235F2 modules, fixed ground mount, PV Powered PVP 260kW inverter. On-site pyranometer and weather station."
+nist_canopy,NIST Gaithersburg — Parking Canopy,DMV,real,39.1385,-77.2155,137.0,242.5,DC nameplate (published system metadata),5.0,90.0,4901,"Measured telemetry. NREL PVDAQ system 4901 via the OEDI data lake. 1032 Sharp NU-U235F2 modules on a dual east/west canopy (azimuth 90 and 270); the registry records the east mount only, so physics-model output is approximate for this site."
+nist_roof,NIST Gaithersburg — Building Roof,DMV,real,39.1354,-77.2156,149.0,73.7,DC nameplate (published system metadata),10.0,180.0,4903,"Measured telemetry. NREL PVDAQ system 4903 via the OEDI data lake. 312 Sharp NU-U235F2 modules, low-tilt roof mount, Satcon PVS-75 inverter."
+gmu_fairfax,George Mason University — Fairfax Campus,DMV,synthetic,38.8316,-77.3072,88.0,250.0,Illustrative estimate,25.0,180.0,,"SIMULATED. Institution name and approximate location used for illustration only; not measured operational data from this institution."
+nova_annandale,NOVA — Annandale Campus,DMV,synthetic,38.8304,-77.1949,95.0,80.0,Illustrative estimate,25.0,180.0,,"SIMULATED. Institution name and approximate location used for illustration only; not measured operational data from this institution."
+nova_alexandria,NOVA — Alexandria Campus,DMV,synthetic,38.8212,-77.0681,15.0,60.0,Illustrative estimate,25.0,180.0,,"SIMULATED. Institution name and approximate location used for illustration only; not measured operational data from this institution."
+nova_loudoun,NOVA — Loudoun Campus,DMV,synthetic,39.0219,-77.4880,101.0,120.0,Illustrative estimate,25.0,180.0,,"SIMULATED. Institution name and approximate location used for illustration only; not measured operational data from this institution."
+nova_manassas,NOVA — Manassas Campus,DMV,synthetic,38.7515,-77.4866,90.0,75.0,Illustrative estimate,25.0,180.0,,"SIMULATED. Institution name and approximate location used for illustration only; not measured operational data from this institution."
+nova_woodbridge,NOVA — Woodbridge Campus,DMV,synthetic,38.6328,-77.2764,30.0,90.0,Illustrative estimate,25.0,180.0,,"SIMULATED. Institution name and approximate location used for illustration only; not measured operational data from this institution."
+dc_community,DC Community Solar (illustrative),DMV,synthetic,38.9072,-77.0369,7.0,500.0,Illustrative estimate,20.0,180.0,,"SIMULATED. Placeholder representing aggregated DC community solar; not a specific real installation."
