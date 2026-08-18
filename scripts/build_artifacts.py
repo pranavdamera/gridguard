@@ -26,7 +26,7 @@ import logging
 import sys
 from pathlib import Path
 
-from gridguard.artifacts.manifest import MANIFEST_FILENAME, ArtifactManifest
+from gridguard.artifacts import MANIFEST_FILENAME, ArtifactManifest
 from gridguard.config import settings
 from gridguard.data.synthetic import DEMO_SITE_ID
 from gridguard.pipeline import build_site

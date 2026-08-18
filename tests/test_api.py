@@ -29,7 +29,7 @@ def built_store(tmp_path_factory):
     root = tmp_path_factory.mktemp("artifacts")
     model_dir, data_dir = root / "models", root / "data"
 
-    from gridguard.artifacts.manifest import MANIFEST_FILENAME, ArtifactManifest
+    from gridguard.artifacts import MANIFEST_FILENAME, ArtifactManifest
     from gridguard.pipeline import build_site
 
     result = build_site(

@@ -50,6 +50,15 @@ target-version = "py311"
 select = ["E", "F", "I", "UP"]
 ignore = ["E501"]
 
+[tool.ruff.lint.isort]
+# Declare first-party packages explicitly instead of letting ruff infer them
+# from the filesystem. The inference is environment-dependent: a working tree
+# containing generated directories (artifacts/, data/processed/) classified
+# some `gridguard.*` imports differently than a fresh clone did, so `ruff check`
+# passed locally and failed in CI on identical code. An explicit list makes the
+# result depend only on what is committed.
+known-first-party = ["gridguard", "tests"]
+
 [tool.black]
 line-length = 100
 target-version = ["py311"]
