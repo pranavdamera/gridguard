@@ -116,45 +116,73 @@ flag if normalised < -k                            # default k = 2.0
 Per-hour normalisation prevents false positives at peak irradiance (where absolute
 residuals are naturally larger) and missed alarms at dawn/dusk.
 
-**Limitation:** No formal coverage guarantee. The threshold k is a heuristic.
+**Limitation:** No formal coverage guarantee. The threshold *k* is a heuristic, and
+it is badly miscalibrated on heavy-tailed residuals — outliers inflate the σ that
+defines the threshold, so a "2σ" rule can cover ~99% instead of the ~95% that
+choice of *k* implies, silently missing faults. The sigma detector is retained
+only as a benchmark.
 
-### Next step: conformal lower prediction bound
+### Conformal lower prediction bound (production default)
 
-`src/gridguard/anomaly/conformal.py` implements the foundation:
+Split conformal prediction replaced sigma thresholding as the default detector.
+`src/gridguard/anomaly/conformal.py` implements it with Mondrian (per-irradiance-
+bucket) calibration.
 
 ```python
-from gridguard.anomaly.conformal import compute_conformal_bound, flag_conformal_anomalies
+from gridguard.anomaly.conformal import ConformalCalibration
 
-# Compute bound from training-split residuals
-bound = compute_conformal_bound(train_residuals, alpha=0.1)
-
-# Flag evaluation intervals
-flags = flag_conformal_anomalies(eval_residuals, train_residuals, alpha=0.1)
+calibration = ConformalCalibration.fit(
+    residuals=held_out_residuals,      # NOT training residuals — see below
+    irradiance_wm2=held_out_irradiance,
+    alpha=0.05,
+)
+lower_bound = calibration.lower_bound_for(irradiance_wm2=820)
+coverage = calibration.coverage_on(test_residuals, test_irradiance)
 ```
 
-**Guarantee:** At miscoverage level α, at most ⌈(n+1)α⌉/n of calibration intervals
-fall below the bound. For α=0.1, roughly 90% of non-fault intervals will *not* be
-flagged, regardless of the residual distribution.
+**Guarantee.** Given calibration residuals exchangeable with future residuals,
+`P(actual − predicted ≥ bound) ≥ 1 − α`, with no distributional assumption. At
+α = 0.05 that means at most ~5% of healthy intervals should breach the bound —
+a design parameter, not a hope.
 
-**Reference:** Angelopoulos & Bates (2022), *A Gentle Introduction to Conformal
-Prediction and Distribution-Free Uncertainty Quantification.* arXiv:2107.07511.
+**Two implementation details that turned out to matter:**
 
-Integrating the conformal bound into the production `detect_anomalies()` path (replacing
-or complementing sigma thresholding) is the next concrete ML improvement.
+1. *Calibrate on held-out data.* Calibrating on the model's own training
+   residuals produces bounds that are too tight, because in-sample errors are
+   biased small. Coverage sat below the stated guarantee until this was fixed.
+2. *Calibrate on data close in time.* Array performance drifts, so
+   exchangeability decays with temporal separation. Calibration uses the most
+   recent healthy validation intervals; widening the validation window (which
+   increases separation) measurably *degraded* coverage.
+
+**Measured coverage** on held-out healthy intervals: 0.962 / 0.989 / 0.991 on the
+three real arrays against a 0.95 target. Two simulated sites currently sit below
+target (0.86, 0.90) — the exchangeability limitation manifesting under modelled
+drift, reported per-site rather than tuned away.
+
+**References.** Angelopoulos & Bates (2023), *Conformal Prediction: A Gentle
+Introduction*, arXiv:2107.07511. Vovk et al. (2005), *Algorithmic Learning in a
+Random World* — Mondrian conformal prediction, ch. 4.
 
 ---
 
-## What is synthetic vs real
+## What is measured vs simulated
 
-All generation data in the default workflow is **synthetic** — produced by a
-physics-motivated simulator in `ingestion/download.py`. The simulator models:
+GridGuard runs on both, and never blurs them.
 
-- Sun elevation angle at site latitude (simplified, no pvlib)
-- Clear-sky GHI × log-normal cloud factor
-- Temperature with diurnal + seasonal cycle calibrated to Northern Virginia
-- Panel efficiency penalty: −0.4%/°C above 25°C
-- Injected faults on ~5% of days (40–80% output reduction)
+**Measured** — three NIST arrays in Gaithersburg MD, a full year of 15-minute
+telemetry from NREL PVDAQ via the OEDI data lake, with irradiance, temperature
+and wind from instruments at the array. **Forecast accuracy is reported on this
+data.**
 
-The synthetic data is good enough for model development and demo. It is not suitable
-for yield studies, degradation analysis, or regulatory reporting. Real data paths
-(NREL PVDAQ, NSRDB) are documented in `docs/data_sources.md`.
+**Simulated** — seven illustrative DMV campus sites from a pvlib-based generator
+with autocorrelated cloud attenuation and a drifting performance factor whose
+persistence is calibrated against the real arrays' own autocorrelation.
+
+The split of responsibilities is deliberate: measured telemetry has no fault
+labels, so **detection accuracy** can only be measured against injected faults —
+which are injected into the measured data too, keeping generation and weather
+real while only the failures are simulated.
+
+Simulated data remains unsuitable for yield studies, degradation analysis, or
+regulatory reporting. Full provenance in [data_sources.md](data_sources.md).

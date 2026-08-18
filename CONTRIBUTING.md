@@ -10,7 +10,10 @@ extend the anomaly detection methodology are welcome.
 - Keep PRs focused on one thing.
 - Do not overclaim accuracy. If you add a new model, include honest benchmark
   numbers against the persistence baseline.
-- Never commit real sensor data, API keys, or PII.
+- Detection metrics come from *injected* faults. Never describe them as
+  field-validated.
+- Never commit API keys, credentials, or PII. Measured telemetry belongs in
+  `data/curated/` only if it is small, public, and carries a provenance record.
 
 ## Local setup
 
@@ -18,11 +21,9 @@ extend the anomaly detection methodology are welcome.
 git clone https://github.com/YOUR_USERNAME/gridguard.git
 cd gridguard
 python -m venv .venv && source .venv/bin/activate
-make install     # installs with dev extras
-cp .env.example .env
-make data-synthetic
-make train
-make test        # all tests should pass before opening a PR
+make install            # backend + frontend dependencies
+make build-artifacts   # ~4 min; needs no network and no credentials
+make test              # all tests should pass before opening a PR
 ```
 
 ## Code standards
@@ -30,12 +31,17 @@ make test        # all tests should pass before opening a PR
 - Python 3.11+
 - `ruff` for linting, `black` for formatting — run `make format` before committing
 - Every new function needs at least one test in `tests/`
-- Temporal train/test splits are mandatory — never use random splits on time-series
+- Temporal train/test splits are mandatory — never use random splits on time series
+- The anomaly detector must never see lagged power. A degraded system produces low
+  output, so its lagged power is low, so a lag-aware model calls the degradation
+  normal. Use `mode="weather_only"` for anything feeding detection.
+- Anything that displays generation numbers must also carry its `data_mode`.
+  Measured and simulated data are never presented interchangeably.
 
 ## Pull request checklist
 
-- [ ] `make lint` passes
-- [ ] `make test` passes with coverage ≥ 80% on new code
+- [ ] `make lint` passes (ruff, black, eslint, tsc)
+- [ ] `make test` passes
 - [ ] No new dependencies unless clearly justified
 - [ ] Docstring on new public functions
 - [ ] `CHANGELOG.md` entry (if a notable change)

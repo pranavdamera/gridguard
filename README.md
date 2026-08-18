@@ -1,462 +1,456 @@
-# ⚡ GridGuard DMV — Solar Generation Forecasting & Underperformance Detection
+# GridGuard
 
-> Open-source ML system for forecasting solar generation and detecting underperformance
-> in DC/Northern Virginia campus-style solar assets.
+[![CI](https://github.com/pranavdamera/gridguard/actions/workflows/ci.yml/badge.svg)](https://github.com/pranavdamera/gridguard/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
----
+**Open-source spatial intelligence and anomaly detection for distributed solar.**
 
-## What is this
+GridGuard forecasts what a healthy photovoltaic array *should* produce, puts a
+calibrated uncertainty band around that expectation, flags generation that falls
+outside it, and uses nearby sites to separate an equipment fault from a cloud
+that fooled the weather model.
 
-GridGuard DMV forecasts expected solar output for campus-scale PV systems, flags
-intervals where actual generation falls significantly below the model's prediction,
-and groups those intervals into human-readable underperformance events.
-
-The core detection loop:
-
-```
-Weather + Time → Forecast expected output → Compare vs actual → Alert if delta > 2σ
-```
-
-The system ships with a site registry for seven illustrative DMV institutions
-(GMU Fairfax, NOVA campuses, DC Community Solar). Coordinates and capacities are
-approximate estimates from public records. **All data in the default workflow is
-synthetic** — physically simulated, not measured telemetry. Connect a real inverter
-or SCADA feed to use real data.
+It runs on **real measured telemetry** from three NIST arrays in Gaithersburg,
+Maryland, alongside a **simulated** DMV campus fleet used for controlled fault
+injection. The two are never blurred: every API response, chart, and site card
+states which it is showing.
 
 ---
 
-## Why it matters
+## Live demo
 
-Campus energy managers and solar O&M teams need to know:
-- **Did the system underperform today, and how much energy was lost?**
-- **Is the deviation a real fault or just a cloudy afternoon?**
-- **Which site in the fleet needs attention first?**
+| | |
+|---|---|
+| **Frontend** | `<set after deploying — Vercel>` |
+| **API docs** | `<set after deploying — Render>/docs` |
+| **Health** | `<set after deploying — Render>/health` |
 
-GridGuard addresses this by learning what a *healthy* system should produce given the weather, then flagging deviations that exceed a calibrated threshold. The pipeline is designed to connect to real inverter telemetry (SCADA, NREL PVDAQ, or a simple CSV) without structural changes.
+Deployment is documented in [docs/deployment.md](docs/deployment.md). To run it
+locally, see [Quick start](#quick-start) — it takes one command and no
+credentials.
 
-Relevant real-world contexts:
-- **Campus energy management** — universities tracking solar contribution to net-zero goals
-- **Solar O&M** — fault triage and lost revenue estimation across a distributed fleet
-- **DER visibility** — aggregating rooftop solar for grid operators who need generation visibility
-- **Energy resilience** — detecting degradation before it becomes a critical outage
+> **Screenshots / GIF.** Not committed to keep the repository small. To capture
+> them: run the [90-second demo script](docs/demo_script.md), which is
+> deterministic — the same commit reproduces the same events and the same
+> numbers. Capture `/demo` (fleet map), `/events/nist_ground:53` (the real
+> outage, with spatial attribution), and `/data` (provenance). Place them in
+> `docs/images/` and link them here.
+
+---
+
+## What problem it solves
+
+An underperforming solar array is invisible. It still produces a plausible
+bell curve; it is just a smaller one than it should be. Three things have to be
+true before that becomes actionable:
+
+1. **You need a model of expected output.** Otherwise there is nothing to
+   compare against.
+2. **The alert threshold needs a known false-alarm rate.** A threshold picked by
+   eye produces alerts nobody trusts. GridGuard uses conformal prediction: at
+   α = 0.05, at most ~5% of healthy intervals should breach the bound — with no
+   distributional assumption.
+3. **A drop is not always a fault.** If neighbouring arrays under the same sky
+   dropped too, it was the weather. GridGuard checks the neighbourhood before
+   pointing at equipment.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│                 Data Layer                  │
-│  NREL PVDAQ API  ──or──  Synthetic Generator│
-│       (15-min intervals, site-aware)        │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│            Feature Engineering              │
-│  Time cyclic · Irradiance² · Lag-1 · Roll  │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│             Model Training                  │
-│  Persistence · Linear · RandomForest · XGB  │
-│           (temporal split)                  │
-└──────────────────┬──────────────────────────┘
-                   │
-        ┌──────────┴───────────┐
-        │                      │
-┌───────▼───────┐    ┌─────────▼────────┐
-│   Anomaly     │    │  Explainability  │
-│  Detection    │    │  (SHAP values)   │
-│ (residual σ)  │    └──────────────────┘
-└───────┬───────┘
-        │
-┌───────▼───────────────────────────────────┐
-│           FastAPI Backend                  │
-│  /health  /forecast  /anomalies  /events   │
-│  /explain  /metrics                        │
-└───────┬───────────────────────────────────┘
-        │
-┌───────▼───────────────────────────────────┐
-│         Streamlit Dashboard                │
-│  Actual vs Predicted · Anomaly timeline   │
-│  Daily loss · Event explanations          │
-│  Model comparison · SHAP · Forecast panel │
-└───────────────────────────────────────────┘
+                       ┌──────────────────────────────────────┐
+   OEDI data lake ────►│  data/  — one canonical schema        │
+   (NREL PVDAQ)        │    RealPVDataSource   (measured)      │
+                       │    SyntheticDMVSource (simulated)     │
+   simulator ─────────►│  + DatasetProvenance on every frame   │
+                       └──────────────────┬───────────────────┘
+                                          │
+                       ┌──────────────────▼───────────────────┐
+                       │  features/  weather_only | lag_aware  │
+                       └──────────────────┬───────────────────┘
+                                          │
+              ┌───────────────────────────┼──────────────────────────┐
+              ▼                           ▼                          ▼
+     ┌────────────────┐        ┌────────────────────┐      ┌──────────────────┐
+     │ forecasting    │        │ expected generation│      │ physics (pvlib)  │
+     │ RF/XGB/Ridge/  │        │ weather-only XGB   │      │ + hybrid residual│
+     │ persistence    │        │ healthy data only  │      │                  │
+     └────────────────┘        └─────────┬──────────┘      └──────────────────┘
+                                         │
+                       ┌─────────────────▼────────────────────┐
+                       │ anomaly/  conformal bounds (default)  │
+                       │           sigma detector (benchmark)  │
+                       │           event grouping + severity   │
+                       └─────────────────┬────────────────────┘
+                                         │
+                       ┌─────────────────▼────────────────────┐
+                       │ spatial/  haversine neighbourhoods    │
+                       │           site-specific vs regional   │
+                       │ fleet/    health rollup + KPIs        │
+                       └─────────────────┬────────────────────┘
+                                         │
+        scripts/build_artifacts.py ──────┴──────► artifacts/ + manifest.json
+                                                          │
+                       ┌──────────────────────────────────▼──┐
+                       │ FastAPI — loads artifacts, never     │
+                       │ trains                               │
+                       └──────────────────┬───────────────────┘
+                                          │
+                       ┌──────────────────▼───────────────────┐
+                       │ Next.js — fleet map, site analytics,  │
+                       │ event investigation, provenance       │
+                       └──────────────────────────────────────┘
 ```
 
 ---
 
-## DMV site registry
+## Real vs simulated data
 
-GridGuard ships with seven Northern Virginia / DC campus sites:
+This distinction is the organising principle of the project, because the two
+answer questions the other cannot.
 
-```
-GMU Fairfax · NOVA Annandale · NOVA Alexandria · NOVA Loudoun
-NOVA Manassas · NOVA Woodbridge · DC Community Solar
-```
+| | Measured | Simulated |
+|---|---|---|
+| **Sites** | 3 NIST arrays, Gaithersburg MD | 7 DMV campus sites |
+| **Source** | NREL PVDAQ via the OEDI data lake | GridGuard simulator (pvlib clear-sky + AR(1) clouds) |
+| **Weather** | Instruments at the array | Modelled |
+| **Fault labels** | None — real telemetry has none | Known by construction |
+| **Used for** | **Forecast accuracy** | **Detection accuracy** |
 
-Sites are defined in [config/sites.csv](config/sites.csv). Each has a latitude
-that the synthetic generator uses to compute the correct sun elevation angle and
-seasonal irradiance profile.
+**Forecast accuracy is measured on real data.** The target is genuine
+generation, so error metrics describe real predictive skill.
 
-```bash
-# List all sites
-python scripts/download_data.py --list-sites
+**Detection accuracy needs ground truth**, which measured data lacks. So faults
+are injected with known labels — *including into the measured telemetry*, where
+the generation and weather stay real and only the failures are simulated. Every
+detection number in this repository describes performance against injected
+faults, and is labelled as such. None of it is field-validated.
 
-# Generate site-specific synthetic data
-python scripts/download_data.py --source synthetic --site-id gmu_fairfax
-python scripts/download_data.py --source synthetic --site-id nova_loudoun
-```
+The DMV site names (GMU, NOVA, DC) are **illustrative**. No named institution
+supplied telemetry to this project. Every simulated surface says so.
 
-**Note:** Site capacities and coordinates are approximate values from public records.
-Synthetic data is a physics simulation, not real measured output from these campuses.
+### Real-data provenance
+
+| | |
+|---|---|
+| **Dataset** | NREL PVDAQ, distributed via the [Open Energy Data Initiative](https://openei.org/wiki/PVDAQ) data lake |
+| **Systems** | 4901 (canopy, 242.5 kW), 4902 (ground, 270.7 kW), 4903 (roof, 73.7 kW) |
+| **Location** | NIST Gaithersburg, MD (39.13°N, 77.21°W) |
+| **Period** | 2016-01-01 → 2016-12-31, resampled 1-min → 15-min |
+| **Weather** | Co-located pyranometer/reference cell, ambient temperature, wind |
+| **Credentials** | **None.** Anonymous HTTPS. |
+
+The legacy `developer.nrel.gov/api/pvdaq/v3` REST API has been **decommissioned**.
+The data remains public through the OEDI data lake, which is what GridGuard
+reads. NSRDB is implemented ([`data/nsrdb.py`](src/gridguard/data/nsrdb.py)) for
+sites without on-site instruments, but is **not** on the shipped path and needs
+no key for anything GridGuard ships.
+
+Three details that matter, because getting them wrong produces plausible but
+wrong numbers:
+
+- **Channels are selected by declared units, not by name.** On these systems two
+  of four irradiance channels are raw pyranometer millivolts, the column named
+  `ac_power_meter_1864` is reactive energy in kVARh, and wind speed is filed
+  under "AC other". Millivolt channels are rejected rather than converted — the
+  calibration constant is not published, and guessing it would corrupt
+  everything downstream.
+- **The timezone is derived, not assumed.** PVDAQ publishes local and UTC
+  columns; the offset is read from them and confirmed constant across the year
+  (local standard time, no daylight-saving shift).
+- **Every channel is validated against a clear-sky model** transposed into the
+  sensor's own plane. A tilted sensor compared against a horizontal reference
+  fails every winter — that check caught exactly that bug during development.
 
 ---
 
-## What is real vs simulated
+## ML methodology
 
-| Component                       | Status                                                           |
-| ------------------------------- | ---------------------------------------------------------------- |
-| Site IDs, names, region         | Real institution names (illustrative only)                       |
-| Coordinates, capacity_kw        | Approximate estimates from public records                        |
-| Solar generation data           | **Synthetic** — physics simulation, not measured                 |
-| Sun geometry, seasonal swing    | Physically motivated (latitude-parameterised)                    |
-| Fault events                    | **Injected** at ~5% of training days with known labels           |
-| GMU demo underperformance event | **Scripted** — see [Deterministic demo](#deterministic-gmu-demo) |
-| NREL PVDAQ option               | Real data (requires free API key)                                |
+### Two feature sets
+
+| Mode | Purpose | Includes lagged power? |
+|---|---|---|
+| `weather_only` | Expected generation, for anomaly detection | **No** |
+| `lag_aware` | Short-horizon forecasting | Yes |
+
+The exclusion is the constraint the detector rests on. A system degraded for
+days produces low output → its lagged power is low → a lag-aware model predicts
+low output → the degradation is declared normal. The failure is silent and
+total, so it is enforced in code and covered by tests, not left to convention.
+
+### Models
+
+| Model | Notes |
+|---|---|
+| Persistence | Naive lag-1 baseline |
+| Ridge | Regularised linear |
+| RandomForest / XGBoost | Non-linear irradiance × temperature interactions |
+| **pvlib physics** | PVWatts chain from published tilt/azimuth/nameplate. **One** fitted parameter (an overall derate), so the comparison is fair |
+| **Physics + ML hybrid** | Gradient boosting on the physics *residual*, not on power — limits how much of a real fault it can absorb |
+
+All evaluation uses **temporal** splits. Random splits on time series leak the
+future into training and inflate every score.
+
+### Conformal prediction (production default)
+
+Split conformal with Mondrian calibration per irradiance bucket. Given
+exchangeable calibration residuals:
+
+```
+P(actual − predicted ≥ lower_bound) ≥ 1 − α
+```
+
+with **no distributional assumption**. PV residuals are heavy-tailed, where a
+"2σ" rule is badly miscalibrated — the outliers inflate the σ that defines it,
+so it covers ~99% instead of the ~95% the choice of *k* implies, silently
+missing faults. The sigma detector is retained as a benchmark so that comparison
+stays visible rather than asserted.
+
+**What the guarantee does not say.** Coverage is marginal within each bucket,
+not conditional on every interval. Exchangeability is an assumption the world
+breaks — degradation, sensor drift and seasonal shift all violate it, which is
+why calibration is recomputed per build from the *most recent* held-out healthy
+data. And a breach means "outside the calibrated range of healthy behaviour",
+not "this component failed".
+
+### Geospatial methodology
+
+Haversine distances (spherical Earth — under 0.5% from WGS-84 at fleet scale,
+far below the uncertainty in whether two arrays share weather at all). Residuals
+are normalised by nameplate so a 70 kW roof and a 270 kW field are comparable,
+then compared against neighbours within 60 km using both an unweighted median
+and an inverse-distance weighting.
+
+Neighbours are restricted to the **same data mode**: the simulator draws each
+site's weather independently, so a simulated neighbour carries no information
+about a measured array's cloud field, and mixing them would manufacture
+agreement out of noise.
+
+This is **not a fault classifier**. It answers one question — is this deviation
+shared with nearby sites — and always reports the evidence behind its answer.
+With fewer than two neighbours it returns `indeterminate` rather than guessing.
 
 ---
 
-## Repo structure
+## Results
 
-```
-gridguard/
-├── config/
-│   └── sites.csv              # DMV site registry (lat, lon, capacity)
-├── src/gridguard/
-│   ├── config.py              # Pydantic settings (loaded from .env)
-│   ├── sites/
-│   │   └── registry.py        # Site loader and Site dataclass
-│   ├── ingestion/
-│   │   └── download.py        # NREL PVDAQ + site-aware synthetic generator
-│   ├── features/
-│   │   └── engineer.py        # Feature engineering, temporal split
-│   ├── models/
-│   │   ├── baseline.py        # Persistence, Linear, RF, XGBoost
-│   │   ├── train.py           # Training pipeline + residual calibration artifact
-│   │   └── evaluate.py        # Overall + stratified metrics; report saving
-│   ├── anomaly/
-│   │   ├── detect.py          # Residual-based anomaly detection (frozen calibration)
-│   │   └── events.py          # Group consecutive intervals into events + explain
-│   ├── explainability/
-│   │   └── shap_explain.py    # SHAP global + per-alert explanation
-│   └── api/
-│       ├── main.py            # FastAPI app
-│       └── schemas.py         # Pydantic request/response schemas
-├── dashboard/
-│   └── app.py                 # Streamlit dashboard
-├── scripts/
-│   ├── download_data.py       # CLI: --source, --site-id, --demo, --list-sites
-│   └── run_pipeline.py        # CLI: end-to-end training pipeline (--site-id)
-├── tests/
-│   └── ...                    # pytest suite
-├── docs/
-│   ├── architecture.md
-│   ├── data_sources.md
-│   ├── model_card.md
-│   └── demo_script.md         # 2-3 minute MVP demo walkthrough
-└── ...
-```
+All figures come from the artifact manifest of the build that produced the
+served models. Nothing here is hand-entered.
+
+### Forecast accuracy — measured NIST arrays, held out from 2016-10-01
+
+| Site | Best model | MAE (kW) | RMSE (kW) | R² | Capacity |
+|---|---|---|---|---|---|
+| NIST Roof | XGBoost | 0.54 | 1.11 | 0.992 | 73.7 kW |
+| NIST Canopy | XGBoost | 1.22 | 3.20 | 0.993 | 242.5 kW |
+| NIST Ground | RandomForest | 1.57 | 5.26 | 0.992 | 270.7 kW |
+
+### Weather-only models (no lagged power — not comparable with the above)
+
+| Site | pvlib physics | Physics + ML hybrid | Weather-only XGBoost |
+|---|---|---|---|
+| NIST Roof | 0.56 | **0.56** | 0.63 |
+| NIST Canopy | 2.27 | **1.48** | 1.70 |
+| NIST Ground | 5.48 | **4.48** | 4.71 |
+
+MAE in kW. The hybrid beats pure ML on two of three arrays, which is the
+interesting result: anchoring a learned model to a physical one improves it
+*and* constrains how much fault it can absorb. Physics numbers are reported only
+on measured sites — on simulated data the baseline inverts the same clear-sky
+model that generated the series, so its accuracy there is tautological.
+
+### Conformal coverage (target ≥ 0.95, held-out healthy intervals)
+
+| NIST Ground | NIST Canopy | NIST Roof |
+|---|---|---|
+| 0.962 | 0.989 | 0.991 |
+
+All three measured sites meet the guarantee. Two *simulated* sites sit below it
+(0.86, 0.90) — that is the exchangeability limitation manifesting on data with
+deliberately-modelled performance drift. It is reported per-site in the UI
+rather than tuned away.
+
+### Detection — injected faults on measured telemetry
+
+| Site | Precision | Recall | F1 | Events found | False alarms/day |
+|---|---|---|---|---|---|
+| NIST Ground | 0.58 | 0.63 | 0.60 | 5/5 | 0.96 |
+| NIST Roof | 0.68 | 0.51 | 0.58 | 5/5 | 0.80 |
+| NIST Canopy | 0.57 | 0.34 | 0.43 | 5/5 | 0.52 |
+
+**Every event was detected**, but only ~half of the individual intervals within
+them. That gap is real and worth stating plainly: GridGuard reliably notices
+that something is wrong, and is much less reliable about precisely which
+intervals were affected. Per-class breakdowns on `/methodology` show why — total
+outages are caught at 100% recall while gradual degradation is caught at ~35%,
+which is the honest ranking of difficulty. Detection is consistently better on
+simulated data (F1 ≈ 0.87) than on real data, which is exactly what you should
+expect and why the real numbers are the ones quoted here.
 
 ---
 
 ## Quick start
 
 ```bash
-# 1. Clone and install
-git clone https://github.com/pranav-damera/gridguard.git
+git clone https://github.com/pranavdamera/gridguard
 cd gridguard
 python -m venv .venv && source .venv/bin/activate
-make install
 
-# Also install frontend dependencies
-cd web && npm install && cd ..
+make install            # backend + frontend dependencies
+make build-artifacts    # ~4 min. No network, no credentials.
 
-# 2. Copy env files
-cp .env.example .env
-cp web/.env.example web/.env.local
-
-# 3. Reset demo — generates all artifacts deterministically (run once)
-make demo-reset
-
-# 4. Start backend (terminal 1)
-make api
-# → http://localhost:8000/docs
-
-# 5. Start Next.js frontend (terminal 2)
-make web
-# → http://localhost:3000
-
-# 6. (Optional) Start Streamlit research dashboard (terminal 3)
-make dashboard
-# → http://localhost:8501
+make api                # terminal 1 → http://localhost:8000/docs
+make web                # terminal 2 → http://localhost:3000
 ```
 
----
+`make build-artifacts` needs no download because a year of curated measured
+telemetry (~3 MB) is committed to `data/curated/`, and the simulated fleet is
+regenerated deterministically from a fixed seed.
 
-## Repo structure
-
-```
-gridguard/
-├── web/                         # Next.js public frontend (TypeScript + Tailwind)
-│   ├── app/
-│   │   ├── page.tsx             # Landing page
-│   │   ├── demo/page.tsx        # Main demo dashboard
-│   │   ├── sites/[siteId]/      # Site detail
-│   │   ├── events/[eventId]/    # Event drilldown
-│   │   └── methodology/         # Transparent model docs
-│   ├── components/              # Reusable dashboard components
-│   └── lib/api.ts               # API client wrapper
-├── scripts/
-│   ├── reset_demo.py            # One-step deterministic demo reset
-│   ├── download_data.py         # CLI: --source, --site-id, --demo
-│   └── run_pipeline.py          # CLI: end-to-end training pipeline
-├── src/gridguard/
-│   └── api/main.py              # FastAPI — /health /sites /events /demo/scenario …
-├── dashboard/app.py             # Streamlit research dashboard
-├── docs/
-│   ├── methodology.md           # Feature modes, leakage, anomaly detection
-│   ├── deployment.md            # Vercel + Render/Railway deployment
-│   └── demo_script.md           # 2-min demo walkthrough
-└── tests/                       # 92 pytest tests
-```
-
----
-
-## GMU Fairfax demo workflow
-
----
-
-## Deterministic GMU demo
-
-The `--demo` flag generates a **repeatable** underperformance scenario with a
-known daylight fault window, suitable for demo videos.
+Optional research dashboard (`pip install -e ".[dashboard]"` first):
 
 ```bash
-python scripts/download_data.py --source synthetic --site-id gmu_fairfax --demo
-python scripts/run_pipeline.py --site-id gmu_fairfax --demo
+make dashboard          # → http://localhost:8501
 ```
 
-**Scripted underperformance event:**
-
-- **Site:** GMU Fairfax (250 kW, 38.83°N)
-- **Date:** 2023-06-15 (clear summer day)
-- **Window:** 09:00 – 12:15 local time (13 intervals, ~3.25 hours)
-- **Effect:** ~70% generation reduction during peak irradiance hours
-- **Cache file:** `data/processed/raw_gmu_fairfax_demo.parquet`
-
-This event is **scripted for demonstration purposes** — it does not represent
-a real fault at GMU. After running the demo pipeline, look for this event in the
-Anomaly Events table with `severity: high`.
+Streamlit is an internal model-diagnostics surface. **The Next.js app is the
+product.**
 
 ---
 
-## Commands
+## API
 
-| Command                                                        | Description                                           |
-| -------------------------------------------------------------- | ----------------------------------------------------- |
-| `make install`                                                 | Install all dependencies                              |
-| `make data-synthetic`                                          | Generate 2 years of generic synthetic solar data      |
-| `make data-gmu`                                                | Generate site-specific synthetic data for GMU Fairfax |
-| `make data-nrel`                                               | Download real NREL PVDAQ data (requires API key)      |
-| `make train`                                                   | Run full training pipeline (generic data)             |
-| `make train-gmu`                                               | Train models using GMU Fairfax synthetic data         |
-| `make api`                                                     | Start FastAPI server                                  |
-| `make dashboard`                                               | Start Streamlit dashboard                             |
-| `make test`                                                    | Run pytest suite with coverage                        |
-| `make lint`                                                    | Run ruff + black check                                |
-| `make format`                                                  | Auto-fix lint issues                                  |
-| `make docker-up`                                               | Start API + dashboard via Docker                      |
-| `python scripts/download_data.py --list-sites`                 | Print the DMV site registry                           |
-| `python scripts/download_data.py --site-id gmu_fairfax`        | Generate site-specific data                           |
-| `python scripts/download_data.py --site-id gmu_fairfax --demo` | Generate deterministic demo data                      |
-
----
-
-## API reference
-
-After `make api`, docs are at http://localhost:8000/docs
-
-**GET /health**
-
-```json
-{ "status": "ok", "model_loaded": true, "data_rows": 17520, "version": "0.1.0" }
-```
-
-**POST /forecast**
-
-```json
-{
-  "timestamp": "2023-07-15T14:00:00",
-  "irradiance_wm2": 820,
-  "temperature_c": 31,
-  "wind_speed_ms": 2.5
-}
-```
-
-```json
-{ "timestamp": "...", "predicted_kw": 7.84, "model_name": "xgboost" }
-```
-
-**GET /events?limit=20**
-
-```json
-{
-  "total_events": 18,
-  "total_lost_kwh": 48.7,
-  "events": [
-    {
-      "event_id": 1,
-      "start_time": "2023-06-15T09:00:00",
-      "end_time": "2023-06-15T12:15:00",
-      "duration_minutes": 210,
-      "total_lost_kwh": 23.6,
-      "severity": "high",
-      "explanation": "During this 3h 30min event, the model expected 45.2 kW average output but actual generation was 13.5 kW — 70% below forecast. Estimated lost energy: 23.6 kWh. Severity: high."
-    }
-  ]
-}
-```
-
-**GET /anomalies?limit=50**, **GET /metrics**, **GET /explain?timestamp=...**
-— see http://localhost:8000/docs
-
----
-
-## ML approach
-
-### Two feature modes
-
-GridGuard distinguishes two feature sets for different modelling goals:
-
-| Mode | Purpose | Allowed features |
-|---|---|---|
-| `weather_only` | Expected-generation baseline / anomaly detection | Weather, time, site metadata. No actual-power lags. |
-| `lag_aware` | Short-horizon operational forecasting | All weather + time features + `ac_power_lag1`, `ac_power_lag4` |
-
-**Why the distinction matters:** If you train an anomaly detector with lag features, a system that has been degraded for days produces low power → lag₁ is low → the model learns to predict low → the degradation is invisible. The `weather_only` mode forces the model to answer "what should a healthy system produce given today's weather?" independently of recent observed output.
-
-```python
-# Weather-only model for anomaly detection (avoids masking persistent faults)
-from gridguard.features.engineer import get_X_y
-X_train, y_train = get_X_y(train_df, mode="weather_only")
-
-# Lag-aware model for next-interval operational forecast
-X_train, y_train = get_X_y(train_df, mode="lag_aware")
-```
-
-### Models
-
-| Model | Notes |
+| Endpoint | Purpose |
 |---|---|
-| Persistence (lag-1) | Naive baseline — predicts next interval = previous interval |
-| Linear (Ridge) | Regularised linear baseline on all features |
-| RandomForest | Ensemble, handles non-linear irradiance × temperature interactions |
-| XGBoost | Best performer; used for anomaly detection and API by default |
+| `GET /health` | Liveness, artifact commit, what loaded |
+| `GET /sites`, `/sites/{id}` | Registry with provenance disclaimers |
+| `GET /sites/{id}/timeseries` | Actual, expected, calibrated band |
+| `GET /fleet/summary` | Fleet KPIs, per-site health, spatial scope, map bounds |
+| `GET /events`, `/events/{id}` | Events and full investigation |
+| `GET /anomalies` | Interval-level detector output |
+| `POST /forecast` | Expected generation for supplied weather |
+| `GET /metrics` | Model evaluation, read from the manifest |
+| `GET /methodology` | How detection works, and its limits |
+| `GET /data` | Dataset provenance, real vs simulated |
+| `GET /demo/scenario` | Guided walkthrough entry point |
 
-All models use a **temporal train/test split** (not random). Random splits leak future information into training, inflating R² artificially.
+Interactive docs at `/docs`. Every response carrying generation numbers also
+carries the `data_mode` that produced them.
 
-### Anomaly detection
+---
 
-The default detector uses **residual sigma thresholding** calibrated on training data:
+## Reproducible artifacts
 
+One command does everything:
+
+```bash
+make build-artifacts
 ```
-flag if:  (actual - predicted) < -k × σ_hour
+
+→ verify/load data → preprocess → train → calibrate → evaluate → write
+`artifacts/models/manifest.json` recording the git commit, dataset window,
+library versions, hyperparameters, calibration configuration, and every
+evaluation score.
+
+**The backend never trains.** It loads artifacts and reports the manifest
+alongside every metric, so any number in the UI traces to the build that
+produced it. Artifacts (~150 MB) are built during deploy rather than committed;
+the curated measured data that makes that possible offline *is* committed.
+
+---
+
+## Tests
+
+```bash
+make test          # 224 tests
+make lint          # ruff, black, eslint, tsc
 ```
 
-where `σ_hour` is the per-hour residual standard deviation estimated from the training split only. Using training-set stats prevents test-period degradation from contaminating the threshold.
-
-A **conformal lower prediction bound** is implemented in `anomaly/conformal.py` as the principled next step. It provides a coverage guarantee: at miscoverage level α, at most α × n+1 calibration points fall below the bound. See `docs/modeling.md` for details.
-
-### Explainability
-
-SHAP values are computed for the XGBoost model, attributing each prediction to specific features. The `/explain` API endpoint returns the top contributors for any flagged interval.
-
-See [docs/modeling.md](docs/modeling.md) for full model design rationale.
+Covers real-data channel resolution and unit handling, timezone derivation,
+missing-value policy, temporal splits, the no-leakage constraint, conformal
+calibration and coverage, spatial logic, fault injection, provenance, artifact
+loading, and API contracts. CI runs the Python suite on 3.11 and 3.12 plus the
+frontend lint/typecheck/build.
 
 ---
 
 ## Limitations
 
-This is a portfolio and learning project. Be explicit about what it is not:
+Stated plainly, because a demo that oversells is worse than one that doesn't.
 
-- **All data is synthetic** — Real sensor noise, soiling ramp, inverter clipping,
-  and row-to-row shading are not modelled. Retrain on real data before drawing conclusions.
-- **Site data is illustrative** — GMU/NOVA/DC capacities and coordinates are
-  approximate estimates from public records, not official specifications.
-- **No streaming** — Batch pipeline only. Live fault detection needs a streaming layer.
-- **Residual thresholding** — No coverage guarantee. Conformal prediction intervals
-  are the right next step.
-- **Single-site model** — No cross-site transfer or fleet-normalised features.
-- **Not safety-critical** — Do not use as the sole basis for dispatch, maintenance,
-  or financial decisions without independent validation.
-
-See [docs/model_card.md](docs/model_card.md) for the full model card.
-
----
-
-## How to run tests
-
-```bash
-# From repo root (no PYTHONPATH required — pytest.ini sets pythonpath = ["src"])
-pytest
-
-# With coverage
-pytest --cov=gridguard --cov-report=term-missing
-```
+- **Detection metrics are not field-validated.** They come from injected faults.
+  No one has confirmed a GridGuard alert against a real maintenance record.
+- **Interval-level recall is mediocre on real data** (~0.5). Event-level recall
+  is 5/5, so it notices problems; it is imprecise about their exact extent.
+- **Gradual degradation is caught poorly** (~35% of intervals) — the hardest and
+  most economically important case.
+- **It does not diagnose.** It detects and localises deviation. It cannot tell
+  you which component failed, and does not claim to.
+- **Spatial attribution needs fleet density.** Three arrays 400 m apart give a
+  strong signal; sites 50 km apart under different cloud fields do not.
+- **One year of measured data, one site cluster.** No seasonal generalisation
+  across years, and no diversity of climate, mounting, or equipment.
+- **Simulated data is a simulation.** Row-to-row shading, spectral effects,
+  snow, and real inverter dynamics are not modelled.
+- **Conformal coverage degrades under drift** — demonstrated, not hypothetical:
+  two simulated sites currently sit below target.
+- **Three npm advisories remain**, all inside Next.js itself. Fixing them
+  requires moving past the pinned major version; deferred deliberately.
+- **Not safety-critical.** Not a basis for dispatch, maintenance, or financial
+  decisions without independent validation.
 
 ---
 
 ## Roadmap
 
-**Real data ingestion**
-- [ ] NSRDB integration — real irradiance/weather from NREL's National Solar Radiation Database (`/api/solar/nsrdb_psm3`)
-- [ ] PJM Data Miner integration — regional LMP and dispatch signals as grid-context features
-- [ ] PVDAQ/OEDI ingestion — real PV generation records from NREL Open Energy Data Initiative
+- Multi-year, multi-climate measured data — the single biggest credibility gain
+- Event-level precision/recall against a real maintenance log
+- Conformal under distribution shift (weighted / adaptive conformal) to address
+  the drift limitation directly
+- Degradation-trend detection: slow year-over-year decline, distinct from faults
+- PJM market context for lost-revenue estimation (architecturally ready; needs
+  real price data, and GridGuard will not fabricate prices)
+- Streaming ingestion for live detection
 
-**ML improvements**
-- [ ] Conformal prediction intervals — replace sigma thresholding with coverage-guaranteed bounds (`anomaly/conformal.py` foundation is ready)
-- [ ] Weather-only model as default anomaly baseline — train separate XGBoost on `mode="weather_only"` features
-- [ ] Event-level precision/recall evaluation — need labeled fault datasets
-- [ ] pvlib clear-sky model — physics-based GHI as a feature (currently using simplified sun geometry)
-- [ ] PyTorch LSTM baseline — sequence model on sliding windows
-- [ ] Degradation trend detection — slow long-term output decline via residual trend
+---
 
-**System / demo**
-- [ ] Multi-site fleet aggregation — cross-site metrics and correlation
-- [ ] Live data mode — poll a real inverter API, run forecast + anomaly in real time
-- [ ] Email/Slack alerts — notify when high-severity event detected
-- [ ] pvlib integration — replace custom sun geometry with well-tested pvlib computations
+## Documentation
 
-See [docs/research_angle.md](docs/research_angle.md) for the research collaboration context.
+| Document | Contents |
+|---|---|
+| [docs/methodology.md](docs/methodology.md) | Feature modes, leakage, detection design |
+| [docs/modeling.md](docs/modeling.md) | Model design rationale |
+| [docs/data_sources.md](docs/data_sources.md) | Dataset provenance in detail |
+| [docs/model_card.md](docs/model_card.md) | Model card |
+| [docs/deployment.md](docs/deployment.md) | Vercel + Render deployment |
+| [docs/demo_script.md](docs/demo_script.md) | 90-second walkthrough |
+| [docs/research_angle.md](docs/research_angle.md) | Research collaboration context |
 
 ---
 
 ## Stack
 
-| Layer          | Library                          |
-| -------------- | -------------------------------- |
-| Data           | pandas, numpy, pyarrow           |
-| ML             | scikit-learn, xgboost            |
-| Explainability | shap                             |
-| API            | fastapi, uvicorn, pydantic       |
-| Dashboard      | streamlit, plotly                |
-| Config         | pydantic-settings, python-dotenv |
-| Infra          | Docker, docker-compose           |
-| Dev            | pytest, ruff, black, make        |
+| Layer | Libraries |
+|---|---|
+| Data | pandas, numpy, pyarrow |
+| ML | scikit-learn, xgboost, **pvlib** |
+| Uncertainty | split conformal prediction (implemented here) |
+| Explainability | shap |
+| API | fastapi, uvicorn, pydantic |
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind, **MapLibre GL**, Recharts |
+| Research UI | streamlit, plotly (optional extra) |
+| Dev | pytest, ruff, black |
 
 ---
 
+## Attribution
+
+Measured data: **NREL PVDAQ**, via the Open Energy Data Initiative. Basemap:
+**OpenStreetMap** contributors, tiles by **CARTO**. GridGuard is not affiliated
+with NREL, NIST, CARTO, or any institution named in the simulated fleet.
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

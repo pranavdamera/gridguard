@@ -120,32 +120,86 @@ energy managers.
 
 ---
 
+## What is already built (and what it showed)
+
+Three of the directions above are now implemented, and two of them produced
+results worth reporting.
+
+**Split conformal detection is the production default**, with Mondrian
+calibration per irradiance bucket, replacing sigma thresholding (retained as a
+benchmark). Measured coverage on held-out healthy intervals is 0.962–0.991 on the
+three real arrays against a 0.95 target. Two findings emerged that are not
+obvious from the literature alone: calibrating on in-sample residuals silently
+breaks the guarantee (bounds too tight), and coverage degrades measurably as
+calibration data moves further from the evaluated period in time — the
+exchangeability assumption failing under performance drift, visibly rather than
+theoretically. Two simulated sites still sit below target, which is that
+limitation on display.
+
+**Real measured data is integrated** — three NIST arrays via the OEDI data lake,
+paired with weather measured at the array itself, so no reanalysis or satellite
+product is needed and the real-data path requires no credentials at all.
+
+**Spatial attribution is implemented** across a ten-site fleet: capacity-normalised
+residuals, haversine neighbourhoods, and a site-specific-versus-regional verdict
+that reports its evidence and declines to guess below two neighbours. On real
+data it correctly localised a genuine NIST ground-array outage as site-specific,
+because the two neighbouring arrays 400 m away were producing normally.
+
+---
+
 ## Concrete next steps for research collaboration
 
-1. **Conformal intervals paper:** Extend conformal_bound to a full split-conformal
-   anomaly detector with formal coverage proof. Compare against sigma thresholding on
-   the injected fault dataset (known labels → precision/recall measurable).
+1. **Conformal under distribution shift.** The drift-induced coverage degradation
+   above is measurable and reproducible in this repository, which makes it a
+   ready-made testbed for weighted or adaptive conformal methods (Tibshirani et
+   al., 2019; Barber et al., 2023; Gibbs & Candès, 2021). The question is
+   concrete: can adaptive conformal restore the guarantee on the two sites where
+   drift currently breaks it, without widening the bound so far that recall
+   collapses?
 
-2. **NSRDB ingestion + evaluation:** Connect `ingestion/download.py` to the NSRDB API,
-   retrain models on real irradiance, and measure whether the feature improves MAPE
-   on held-out test months (especially winter and storm days).
+2. **Gradual degradation detection.** Currently the weakest result by a wide
+   margin — ~35% interval recall against ~100% for complete outages — and also
+   the most economically consequential, since slow decline is what actually
+   erodes lifetime yield. A residual-trend or change-point formulation over weeks
+   rather than intervals is the obvious framing.
 
-3. **Multi-site fleet study:** Deploy all 7 DMV sites with synthetic data, compute
-   cross-site residual correlations, and test whether a spatially-aware detector reduces
-   false positives during correlated cloudy periods.
+3. **Sensor-fault discrimination.** GridGuard reliably false-alarms on a frozen
+   irradiance sensor (up to 0.59 false-alarm rate on that injected class): the
+   input is wrong, so the expectation is wrong, and the array looks broken when
+   the instrument is. Distinguishing input faults from output faults — perhaps by
+   cross-checking irradiance against neighbours or a clear-sky model — is a
+   well-posed problem with an immediately useful answer.
 
-4. **Economic loss estimation:** Integrate daily PJM LMP (free download from
-   dataminer2.pjm.com) and compute `lost_revenue = lost_kWh × lmp_dollar_per_mwh`
-   for each flagged event. Evaluate whether this changes the priority ranking of events
-   vs. lost_kWh alone.
+4. **Multi-year, multi-climate validation.** One year at one site cluster is the
+   single biggest limitation on every claim in this repository. PVDAQ has many
+   more systems; the ingestion layer already generalises to them.
+
+5. **Event-level validation against maintenance records.** Every detection number
+   here is against *injected* faults. Nothing has been confirmed against a real
+   O&M log. Any dataset pairing telemetry with maintenance tickets would convert
+   this from a methodology demonstration into evidence.
+
+6. **Economic loss estimation.** Daily PJM LMP (dataminer2.pjm.com) would allow
+   `lost_revenue = lost_kWh × price`, and the interesting question is whether it
+   reorders event priority relative to lost kWh alone. Deliberately not
+   implemented yet: GridGuard will not fabricate prices, and this needs real
+   market data to be worth anything.
 
 ---
 
 ## Honest limitations for research context
 
-- All data is currently synthetic. Claims about detection performance reflect
-  simulated faults, not real inverter failures.
-- The site registry uses approximate coordinates and capacities from public records.
-- The conformal bound is implemented but not yet integrated into the production detection path.
-- Single-site model only — no cross-site transfer learning.
-- No streaming: batch pipeline only. Real-time fault detection would need a streaming layer.
+- **Detection performance is measured against injected faults**, not observed
+  field failures. No alert has been confirmed against a maintenance record.
+- **Interval-level recall on real data is ~0.5**, against 5/5 event-level recall.
+  GridGuard notices problems reliably and characterises their extent poorly.
+- **One year, one site cluster, one climate.** No cross-year or cross-climate
+  generalisation is demonstrated.
+- **Conformal coverage degrades under drift** — observed on two sites, not
+  hypothetical.
+- **Sensor dropout produces confident false alarms.**
+- The simulated fleet's site registry uses approximate coordinates and capacities
+  from public records, and its institution names are illustrative only.
+- **No streaming.** Batch evaluation only; live detection needs a streaming layer.
+- Spatial attribution is not a fault classifier and does not identify components.
