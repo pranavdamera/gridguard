@@ -1,175 +1,247 @@
-import { Card, CardTitle } from "@/components/ui/Card";
+import { api, tryFetch } from "@/lib/api";
+import { Card, CardTitle, ErrorPanel } from "@/components/ui/Primitives";
+
+export const revalidate = 300;
 
 export const metadata = {
   title: "Methodology — GridGuard",
+  description:
+    "How GridGuard forecasts expected solar generation, calibrates uncertainty with conformal prediction, evaluates detection against injected faults, and attributes deviation spatially.",
 };
 
-export default function MethodologyPage() {
+export default async function MethodologyPage() {
+  const { data, error } = await tryFetch(() => api.methodology());
+
+  if (error || !data) {
+    return (
+      <div className="mx-auto max-w-4xl px-4 py-8">
+        <ErrorPanel error={error ?? "No methodology available"} />
+      </div>
+    );
+  }
+
+  const artifact = data.artifact as
+    | {
+        built_at?: string;
+        git_commit?: string;
+        python_version?: string;
+        package_versions?: Record<string, string>;
+        sites_built?: string[];
+      }
+    | null;
+
+  const spatial = data.spatial_method as Record<string, string | number | string[]>;
+
   return (
-    <div className="max-w-3xl mx-auto px-4 py-10 space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-100 mb-2">Methodology</h1>
-        <p className="text-slate-400 text-sm">
-          Transparent documentation of what GridGuard does, what is real vs synthetic,
-          and the key modeling decisions that determine credibility.
+    <div className="mx-auto max-w-4xl px-4 py-8">
+      <header className="mb-6">
+        <h1 className="text-xl font-semibold tracking-tight text-slate-100">
+          Methodology
+        </h1>
+        <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-slate-400">
+          Everything on this page is read from the artifact manifest produced by
+          the build that created the models currently being served — not written
+          by hand, so it cannot drift away from what the models actually do.
         </p>
-      </div>
+      </header>
 
-      <Card>
-        <CardTitle>Data</CardTitle>
-        <div className="prose prose-invert prose-sm max-w-none text-slate-400 space-y-3">
-          <p>
-            All generation data shown in this demo is{" "}
-            <strong className="text-slate-200">deterministic synthetic telemetry</strong> for
-            a GMU Fairfax-style 250 kW campus PV asset. The synthetic model uses:
+      {/* ---- Feature modes ---- */}
+      <section>
+        <Card>
+          <CardTitle>Two feature sets, and why the split matters</CardTitle>
+          <div className="space-y-4">
+            {Object.entries(data.feature_modes).map(([mode, detail]) => (
+              <div key={mode}>
+                <h3 className="font-mono text-xs text-cyan-400">{mode}</h3>
+                <p className="mt-1 text-xs text-slate-300">{detail.purpose}</p>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  {detail.rationale}
+                </p>
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {detail.features.map((f) => (
+                    <span
+                      key={f}
+                      className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] text-slate-400"
+                    >
+                      {f}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </section>
+
+      {/* ---- Conformal ---- */}
+      <section className="mt-5">
+        <Card>
+          <CardTitle hint={`α = ${data.conformal_alpha}`}>
+            Calibrated uncertainty ({data.detection_method})
+          </CardTitle>
+          <p className="rounded border border-cyan-900/50 bg-cyan-950/20 px-3 py-2 text-xs leading-relaxed text-cyan-100/80">
+            {data.conformal_guarantee}
           </p>
-          <ul className="list-disc pl-5 space-y-1">
-            <li>Clear-sky irradiance from simplified sun geometry (latitude-parameterised)</li>
-            <li>Log-normal cloud attenuation with autocorrelation</li>
-            <li>Northern Virginia seasonal and diurnal temperature cycle</li>
-            <li>Panel efficiency degradation with temperature (−0.4%/°C above 25°C)</li>
-            <li>Random injected fault days (~5% of days) at 40–80% output reduction</li>
-            <li>
-              <strong className="text-amber-300">Scripted demo event:</strong> June 15, 2023 09:00–12:15 — 70% AC
-              power reduction during peak irradiance. This is deterministically injected, not random.
-            </li>
+          <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            What the guarantee does not say
+          </h3>
+          <ul className="mt-1.5 space-y-1.5 pl-4 text-xs leading-relaxed text-slate-400">
+            {data.conformal_limitations.map((limit, i) => (
+              <li key={i} className="list-disc">
+                {limit}
+              </li>
+            ))}
           </ul>
-          <p>
-            Real-data adapters are planned for: NREL PVDAQ, NSRDB satellite irradiance, CSV
-            upload from campus telemetry systems, and PJM metering data.
-          </p>
-        </div>
-      </Card>
+        </Card>
+      </section>
 
-      <Card>
-        <CardTitle>Two feature modes — the most important modeling decision</CardTitle>
-        <div className="text-slate-400 text-sm space-y-3">
-          <p>
-            GridGuard uses <strong className="text-slate-200">strictly separate feature sets</strong> for
-            forecasting vs anomaly detection. This is not cosmetic — it prevents a class of temporal leakage
-            that would make the anomaly detector meaningless.
-          </p>
-
-          <div className="grid sm:grid-cols-2 gap-4 mt-3">
-            <div className="border border-slate-700 rounded p-3">
-              <div className="text-cyan-400 text-xs font-semibold uppercase tracking-wider mb-2">
-                Weather-only (anomaly detection)
-              </div>
-              <div className="text-xs space-y-1">
-                <div className="text-slate-300">Used to answer: <em>what should a healthy system produce?</em></div>
-                <div className="text-slate-500 mt-2">Features: irradiance, irradiance², temperature, wind speed, 1h rolling irradiance, hour sin/cos, day-of-year sin/cos, month</div>
-                <div className="text-emerald-400 mt-2">✓ No lag features</div>
-              </div>
+      {/* ---- Physics ---- */}
+      {data.physics_model && (
+        <section className="mt-5">
+          <Card>
+            <CardTitle hint="pvlib">Physics baseline</CardTitle>
+            <p className="text-xs leading-relaxed text-slate-400">
+              {String(
+                (data.physics_model as Record<string, unknown>).assumption_note ?? "",
+              )}
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
+              {Object.entries(
+                ((data.physics_model as Record<string, unknown>).assumptions ??
+                  {}) as Record<string, number>,
+              ).map(([key, value]) => (
+                <div key={key} className="rounded border border-slate-800 px-2 py-1.5">
+                  <div className="font-mono text-[10px] text-slate-500">{key}</div>
+                  <div className="tabular-nums text-slate-300">{value}</div>
+                </div>
+              ))}
             </div>
-            <div className="border border-slate-700 rounded p-3">
-              <div className="text-amber-400 text-xs font-semibold uppercase tracking-wider mb-2">
-                Lag-aware (operational forecasting)
+            <p className="mt-2 text-[11px] text-slate-600">
+              Free parameters fitted from data:{" "}
+              {String(
+                (data.physics_model as Record<string, unknown>).free_parameters ?? 0,
+              )}{" "}
+              (an overall derate). Everything else is fixed physics or published
+              system metadata.
+            </p>
+          </Card>
+        </section>
+      )}
+
+      {/* ---- Fault taxonomy ---- */}
+      <section className="mt-5">
+        <Card>
+          <CardTitle hint={`${data.fault_taxonomy.length} classes`}>
+            How detection is evaluated
+          </CardTitle>
+          <p className="text-xs leading-relaxed text-slate-400">
+            Measured PV telemetry carries no trustworthy fault labels, so
+            detection is scored against faults injected into the held-out test
+            split — including of the measured data, where the generation and
+            weather are genuine and only the failures are simulated. Three of
+            these classes are <em>not</em> generation losses; a detector that
+            flags them is producing false alarms, and they are scored that way.
+          </p>
+          <div className="mt-3 space-y-1.5">
+            {data.fault_taxonomy.map((fault) => (
+              <div
+                key={fault.fault_type}
+                className="flex gap-3 rounded border border-slate-800 px-3 py-1.5"
+              >
+                <span
+                  className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${
+                    fault.is_generation_loss ? "bg-red-500" : "bg-slate-600"
+                  }`}
+                  title={
+                    fault.is_generation_loss
+                      ? "Generation loss — should be detected"
+                      : "Not a loss — should not be flagged"
+                  }
+                />
+                <div>
+                  <span className="font-mono text-[11px] text-slate-300">
+                    {fault.fault_type}
+                  </span>
+                  <p className="text-[11px] leading-relaxed text-slate-500">
+                    {fault.description}
+                  </p>
+                </div>
               </div>
-              <div className="text-xs space-y-1">
-                <div className="text-slate-300">Used to answer: <em>what will the system produce next?</em></div>
-                <div className="text-slate-500 mt-2">Features: all weather-only features + ac_power_lag1 (prev 15 min) + ac_power_lag4 (1 h ago)</div>
-                <div className="text-red-400 mt-2">⚠ Not used for fault detection</div>
+            ))}
+          </div>
+        </Card>
+      </section>
+
+      {/* ---- Spatial ---- */}
+      <section className="mt-5">
+        <Card>
+          <CardTitle hint={`radius ${spatial.neighbor_radius_km} km`}>
+            Spatial attribution
+          </CardTitle>
+          <dl className="space-y-2 text-xs">
+            {(
+              [
+                ["distance", "Distance"],
+                ["normalisation", "Normalisation"],
+                ["weighting", "Weighting"],
+                ["constraint", "Constraint"],
+              ] as const
+            ).map(([key, label]) => (
+              <div key={key}>
+                <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                  {label}
+                </dt>
+                <dd className="leading-relaxed text-slate-400">{String(spatial[key])}</dd>
               </div>
-            </div>
-          </div>
+            ))}
+          </dl>
+          <p className="mt-3 rounded border border-slate-800 bg-slate-950/40 px-3 py-2 text-[11px] leading-relaxed text-slate-400">
+            <strong className="text-slate-300">Limitation. </strong>
+            {String(spatial.limitation)}
+          </p>
+        </Card>
+      </section>
 
-          <p>
-            <strong className="text-slate-200">Why this matters:</strong> If lag features are included in the
-            expected-generation model, a degraded inverter that has been producing low power for hours will
-            have low lags. The model then predicts low power as expected, the residual is small, and the
-            anomaly is missed. Using weather-only features means the model always asks &ldquo;given today&apos;s
-            sun and temperature, what should a healthy system produce?&rdquo;
-          </p>
-        </div>
-      </Card>
-
-      <Card>
-        <CardTitle>Anomaly detection method</CardTitle>
-        <div className="text-slate-400 text-sm space-y-2">
-          <p>
-            Residual thresholding with training-set calibration:
-          </p>
-          <ol className="list-decimal pl-5 space-y-1">
-            <li>Temporal split: training data before 2023-01-01, test data after. Never random shuffle.</li>
-            <li>Within training data, reserve the last 15% as a validation set for early stopping.</li>
-            <li>
-              Train <code className="text-xs bg-slate-700 px-1 rounded">anomaly_detector.pkl</code> (XGBoost,
-              weather-only features) on <em>healthy training intervals only</em> — injected fault rows are
-              excluded so the model cannot learn &ldquo;low output is normal.&rdquo;
-            </li>
-            <li>Compute residuals (actual − predicted) on healthy training intervals.</li>
-            <li>Fit per-hour-of-day (mean, std) from those residuals. Save to artifact file.</li>
-            <li>At inference: residual_σ = (residual − mean_train_hour) / std_train_hour.</li>
-            <li>Flag as anomaly if residual_σ {"<"} −2.0 during daylight (irradiance {">"} 50 W/m²).</li>
-          </ol>
-          <p className="mt-2">
-            The per-hour calibration prevents false positives at peak irradiance (where absolute
-            residuals are naturally larger) and misses at dawn/dusk.
-          </p>
-          <p>
-            <strong className="text-slate-200">Next step:</strong> Replace sigma thresholding with
-            conformal prediction intervals for coverage guarantees. Implementation stub is in{" "}
-            <code className="text-xs bg-slate-700 px-1 rounded">src/gridguard/anomaly/conformal.py</code>.
-          </p>
-        </div>
-      </Card>
-
-      <Card>
-        <CardTitle>Models trained</CardTitle>
-        <div className="text-slate-400 text-sm space-y-4">
-          <div>
-            <div className="text-slate-300 font-medium mb-1.5">
-              Anomaly detector — <code className="text-xs bg-slate-700 px-1 rounded">anomaly_detector.pkl</code>
-            </div>
-            <ul className="space-y-1">
-              <li><strong className="text-emerald-400">XGBoost, weather-only features, healthy data only.</strong> Used for /anomalies and /events. Cannot see lag features; cannot mask degradation.</li>
-            </ul>
-          </div>
-          <div>
-            <div className="text-slate-300 font-medium mb-1.5">Forecasting models — lag-aware, for /forecast and /metrics comparison</div>
-            <ul className="space-y-1">
-              <li><strong className="text-slate-300">Persistence</strong> — carry last observation. Naive benchmark.</li>
-              <li><strong className="text-slate-300">Ridge</strong> — linear, L2-regularized. Interpretable baseline.</li>
-              <li><strong className="text-slate-300">Random Forest</strong> — ensemble decision trees. Solid nonlinear baseline.</li>
-              <li><strong className="text-slate-300">XGBoost (lag-aware)</strong> — gradient-boosted trees. Best short-horizon forecast accuracy.</li>
-            </ul>
-          </div>
-          <p>
-            All models use a chronological train/validation/test split. XGBoost uses the validation set
-            for early stopping — <em>never the test set</em>. Random splits are never used.
-          </p>
-        </div>
-      </Card>
-
-      <Card>
-        <CardTitle>Explainability</CardTitle>
-        <div className="text-slate-400 text-sm space-y-2">
-          <p>
-            SHAP (SHapley Additive exPlanations) values are computed per anomaly interval using
-            the best available model. For tree models (XGBoost, Random Forest) this uses the
-            TreeExplainer — exact Shapley values, not approximations.
-          </p>
-          <p>
-            If SHAP is unavailable, the dashboard falls back to model feature importances, clearly labeled.
-          </p>
-        </div>
-      </Card>
-
-      <Card>
-        <CardTitle>What this is not</CardTitle>
-        <div className="text-slate-400 text-sm space-y-1">
-          <ul className="list-disc pl-5 space-y-1">
-            <li>Not a real-time system. Data is static demo telemetry, regenerated on demand.</li>
-            <li>Not connected to live sensor data. No SCADA, no live inverter feeds.</li>
-            <li>Not production-grade. No auth, rate limiting, or database persistence in this MVP.</li>
-            <li>Not claiming research-validated results on real installations (yet).</li>
-          </ul>
-        </div>
-      </Card>
-
-      <div className="text-xs text-slate-600 pt-4 border-t border-slate-800">
-        Full source code: <a href="https://github.com/pranav-damera/gridguard" className="underline">github.com/pranav-damera/gridguard</a>
-      </div>
+      {/* ---- Build provenance ---- */}
+      {artifact && (
+        <section className="mt-5">
+          <Card>
+            <CardTitle>Artifact build</CardTitle>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] sm:grid-cols-3">
+              <div>
+                <dt className="text-slate-500">Built at</dt>
+                <dd className="text-slate-300">{artifact.built_at ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">Commit</dt>
+                <dd className="font-mono text-slate-300">
+                  {artifact.git_commit?.slice(0, 12) ?? "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">Python</dt>
+                <dd className="text-slate-300">{artifact.python_version ?? "—"}</dd>
+              </div>
+            </dl>
+            {artifact.package_versions && (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {Object.entries(artifact.package_versions).map(([name, version]) => (
+                  <span
+                    key={name}
+                    className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] text-slate-400"
+                  >
+                    {name} {version}
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className="mt-2 text-[11px] text-slate-600">
+              Every metric shown anywhere in this application comes from this
+              build. The backend loads prebuilt artifacts and never trains.
+            </p>
+          </Card>
+        </section>
+      )}
     </div>
   );
 }

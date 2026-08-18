@@ -215,6 +215,45 @@ def _window_frames(start: str | None, end: str | None) -> dict[str, pd.DataFrame
     return frames
 
 
+def _default_fleet_window(days: int = 1) -> tuple[str | None, str | None]:
+    """The window the fleet view opens on when the caller does not specify one.
+
+    Summarising the whole evaluation period is not useful: over several months
+    every site accumulates some event, so every site reads "critical" and no
+    site stands out against its neighbours. Health and spatial attribution are
+    both statements about a *moment*, not a season.
+
+    So the default anchors on the day of the fleet's most severe event — the
+    thing an operator would want the dashboard to open on — falling back to the
+    most recent day of data when there are no events. The resolved window is
+    always returned in the response so the UI can state what it is showing.
+    """
+    events = store.all_events()
+    anchor: pd.Timestamp | None = None
+
+    if not events.empty:
+        severity_rank = {"high": 0, "medium": 1, "low": 2}
+        ranked = events.assign(_rank=events["severity"].map(severity_rank).fillna(3)).sort_values(
+            ["_rank", "total_lost_kwh"], ascending=[True, False]
+        )
+        anchor = pd.Timestamp(ranked.iloc[0]["start_time"])
+    else:
+        latest = [
+            pd.Timestamp(b.detected["timestamp"].max())
+            for b in store.bundles.values()
+            if b.detected is not None and not b.detected.empty
+        ]
+        if latest:
+            anchor = max(latest)
+
+    if anchor is None:
+        return None, None
+
+    start = anchor.normalize()
+    end = start + pd.Timedelta(days=days) - pd.Timedelta(minutes=1)
+    return str(start), str(end)
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
@@ -327,14 +366,23 @@ def fleet_summary(
     data_mode: str | None = Query(default=None, pattern="^(real|synthetic)$"),
     start: str | None = Query(default=None),
     end: str | None = Query(default=None),
+    days: int = Query(default=1, ge=1, le=90, description="Window length when start/end omitted"),
 ):
-    """Fleet KPIs, per-site health, spatial attribution, and map bounds."""
+    """Fleet KPIs, per-site health, spatial attribution, and map bounds.
+
+    With no explicit window, opens on the day of the fleet's most severe event —
+    see :func:`_default_fleet_window`. The resolved window is echoed back in
+    ``window_start``/``window_end``.
+    """
     selected = store.sites(data_mode)
     if not selected:
         raise HTTPException(
             status_code=503,
             detail="No artifacts are loaded. Run `make build-artifacts` and restart the API.",
         )
+
+    if start is None and end is None:
+        start, end = _default_fleet_window(days=days)
 
     frames = {
         s.site_id: _filter_window(store.bundle(s.site_id).detected, start, end)
@@ -355,6 +403,8 @@ def fleet_summary(
     summary = summarise_fleet(statuses, spatial_contexts=contexts)
     payload = summary.to_dict()
     payload["bounds"] = bounding_box(selected)
+    payload["window_start"] = start
+    payload["window_end"] = end or payload.get("window_end")
     return schemas.FleetSummaryResponse(**payload)
 
 

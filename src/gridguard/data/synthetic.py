@@ -51,15 +51,21 @@ logger = logging.getLogger(__name__)
 #: Fixed offset for the DMV region's local standard time (EST).
 UTC_OFFSET_HOURS = -5
 
-#: Default simulated period. Two full years give the temporal split a complete
-#: seasonal cycle on each side.
-DEFAULT_START = "2022-01-01"
-DEFAULT_END = "2023-12-31"
+#: Default simulated period.
+#:
+#: Deliberately aligned with the measured datasets' window so that the fleet
+#: view can show measured and simulated sites on one timeline. Without this
+#: alignment a single fleet snapshot would always report one of the two fleets
+#: as "no data", since the two would never overlap in time. Simulated dates are
+#: arbitrary, so it is the simulation that moves.
+DEFAULT_START = "2016-01-01"
+DEFAULT_END = "2016-12-31"
 
 #: The scripted demonstration event. Deterministic so a recorded walkthrough
-#: reproduces exactly.
+#: reproduces exactly. Placed after the train/test split date so it lands in the
+#: held-out evaluation period the detector is actually scored on.
 DEMO_SITE_ID = "gmu_fairfax"
-DEMO_DATE = "2023-06-15"
+DEMO_DATE = "2016-11-15"
 DEMO_START_HOUR = 9.0
 DEMO_END_HOUR = 12.25
 DEMO_SEVERITY = 0.70

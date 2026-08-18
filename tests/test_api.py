@@ -12,6 +12,8 @@ Nothing here touches the network: the fixture site is synthetic.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -38,8 +40,8 @@ def built_store(tmp_path_factory):
         include_physics=False,
         use_cache=False,
         demo=True,
-        start="2022-01-01",
-        end="2023-06-30",
+        start="2016-01-01",
+        end="2016-12-31",
     )
 
     manifest = ArtifactManifest()
@@ -212,7 +214,7 @@ def test_forecast_returns_prediction_and_band(client):
     response = client.post(
         "/forecast",
         json={
-            "timestamp": "2023-07-15T13:00:00",
+            "timestamp": "2016-07-15T13:00:00",
             "irradiance_wm2": 850.0,
             "temperature_c": 30.0,
             "wind_speed_ms": 2.0,
@@ -230,7 +232,7 @@ def test_forecast_at_night_predicts_near_zero(client):
     body = client.post(
         "/forecast",
         json={
-            "timestamp": "2023-07-15T02:00:00",
+            "timestamp": "2016-07-15T02:00:00",
             "irradiance_wm2": 0.0,
             "temperature_c": 18.0,
             "site_id": FIXTURE_SITE,
@@ -287,3 +289,36 @@ def test_demo_scenario(client):
     assert "not measured operational data" in body["disclaimer"].lower()
     assert body["event"] is not None
     assert body["recommended_actions"]
+
+
+def test_data_page_exposes_measured_provenance(built_store):
+    """Regression: measured provenance lives in data/curated/, not the cache.
+
+    The store originally searched only the working cache, which left the /data
+    page reporting zero measured datasets while happily listing simulated ones —
+    exactly inverting the credibility the page exists to establish.
+    """
+    from gridguard.api.store import ArtifactStore
+
+    store = ArtifactStore(
+        model_dir=built_store.model_dir,
+        data_dir=built_store.data_dir,
+    )
+    assert store.curated_dir.name == "curated"
+
+
+def test_real_sites_resolve_provenance_from_curated_directory():
+    """The shipped curated datasets must each carry a loadable provenance record."""
+    from gridguard.config import settings
+    from gridguard.data.provenance import load_provenance
+    from gridguard.sites.registry import list_sites
+
+    curated = Path(settings.data_curated_dir)
+    if not curated.exists():
+        pytest.skip("curated datasets not present in this checkout")
+
+    for site in list_sites(data_mode="real"):
+        records = load_provenance(curated / f"telemetry_{site.site_id}.provenance.json")
+        assert records, f"no curated provenance for {site.site_id}"
+        assert records[0].data_mode == "real"
+        assert records[0].source_url, f"{site.site_id} provenance has no source URL"

@@ -1,126 +1,347 @@
 import Link from "next/link";
-import { api } from "@/lib/api";
-import { EventExplanationCard } from "@/components/EventExplanationCard";
-import { RecommendedActions } from "@/components/RecommendedActions";
-import { Card, CardTitle } from "@/components/ui/Card";
-import { SeverityBadge } from "@/components/ui/Badge";
-import { MethodologyNotice } from "@/components/MethodologyNotice";
+import { api, tryFetch } from "@/lib/api";
+import { ChartLegend, GenerationChart } from "@/components/GenerationChart";
+import {
+  Card,
+  CardTitle,
+  DataModeBadge,
+  Empty,
+  ErrorPanel,
+  ProvenanceNotice,
+  SeverityBadge,
+  Stat,
+  formatDuration,
+  formatKwh,
+  formatTimestamp,
+} from "@/components/ui/Primitives";
 
 export const revalidate = 60;
 
-interface Props {
+const SCOPE_STYLE: Record<string, string> = {
+  site_specific: "border-red-900 bg-red-950/30 text-red-300",
+  regional: "border-sky-900 bg-sky-950/30 text-sky-300",
+  indeterminate: "border-slate-700 bg-slate-900/60 text-slate-400",
+};
+
+const SCOPE_HEADLINE: Record<string, string> = {
+  site_specific: "Likely site-specific",
+  regional: "Likely regional weather",
+  indeterminate: "Inconclusive",
+};
+
+export default async function EventDetailPage(props: {
   params: Promise<{ eventId: string }>;
-}
+}) {
+  const { eventId } = await props.params;
+  const { data, error } = await tryFetch(() => api.event(eventId));
 
-function fmtTs(ts: string) {
-  return new Date(ts).toLocaleString("en-US", {
-    weekday: "short", month: "short", day: "numeric",
-    hour: "2-digit", minute: "2-digit", hour12: false,
-  });
-}
-
-export default async function EventDetailPage({ params }: Props) {
-  const { eventId } = await params;
-  const id = parseInt(eventId, 10);
-
-  let event = null;
-  let explain = null;
-  let error = null;
-
-  try {
-    event = await api.event(id);
-    // Try to get SHAP explanation for the first anomaly in the event window
-    if (event) {
-      const anoms = await api.anomalies({
-        start: event.start_time,
-        end: event.end_time,
-        only_anomalies: true,
-        limit: 1,
-      });
-      if (anoms.records.length > 0) {
-        explain = await api.explain(anoms.records[0].timestamp).catch(() => null);
-      }
-    }
-  } catch (e) {
-    error = (e as Error).message;
-  }
-
-  if (error || !event) {
+  if (error || !data) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        <Link href="/demo" className="text-xs text-slate-500 hover:text-slate-300 mb-6 inline-block">← Back to demo</Link>
-        <div className="text-red-400 text-sm border border-red-800 bg-red-950/30 rounded p-4">
-          {error ?? "Event not found."}
+      <div className="mx-auto max-w-5xl px-4 py-8">
+        <Link href="/demo" className="text-xs text-slate-500 hover:text-slate-300">
+          ← Fleet
+        </Link>
+        <div className="mt-3">
+          <ErrorPanel error={error ?? "Event not found"} />
         </div>
       </div>
     );
   }
 
+  const { event, spatial_context, neighbor_comparison, timeseries, recommended_actions, contributors } =
+    data;
+  const shortfall =
+    event.mean_predicted_kw > 0
+      ? 1 - event.mean_actual_kw / event.mean_predicted_kw
+      : 0;
+
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8 space-y-5">
-      <div>
-        <Link href="/demo" className="text-xs text-slate-500 hover:text-slate-300">← Back to demo</Link>
-      </div>
+    <div className="mx-auto max-w-5xl px-4 py-8">
+      <Link
+        href={event.site_id ? `/sites/${event.site_id}` : "/demo"}
+        className="text-xs text-slate-500 hover:text-slate-300"
+      >
+        ← {event.site_name ?? "Fleet"}
+      </Link>
 
-      {/* Header */}
-      <div className="flex items-start gap-4 flex-wrap">
-        <div className="flex-1">
-          <div className="flex items-center gap-3 mb-2">
-            <h1 className="text-xl font-semibold text-slate-100">Event #{event.event_id}</h1>
-            <SeverityBadge severity={event.severity} />
-          </div>
-          <p className="text-slate-500 text-sm">
-            {event.site_id && <><span className="font-medium text-slate-400">{event.site_id}</span> · </>}
-            {fmtTs(event.start_time)} – {fmtTs(event.end_time)}
-          </p>
+      <header className="mt-2 mb-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-100">
+            Event investigation
+          </h1>
+          <SeverityBadge severity={event.severity} />
+          {event.data_mode && <DataModeBadge mode={event.data_mode} />}
         </div>
-      </div>
+        <p className="mt-1 text-sm text-slate-400">
+          {event.site_name ?? event.site_id} · {formatTimestamp(event.start_time)} →{" "}
+          {formatTimestamp(event.end_time)}
+        </p>
+      </header>
 
-      <MethodologyNotice />
+      {event.disclaimer && event.data_mode && (
+        <ProvenanceNotice mode={event.data_mode} text={event.disclaimer} />
+      )}
 
-      {/* Summary answers */}
-      <Card>
-        <CardTitle>What happened?</CardTitle>
-        <p className="text-slate-300 text-sm leading-relaxed">{event.explanation}</p>
-      </Card>
+      {/* ---- Operational impact ---- */}
+      <section className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <Stat label="Duration" value={formatDuration(event.duration_minutes)} />
+        <Stat
+          label="Energy lost"
+          value={formatKwh(event.total_lost_kwh).split(" ")[0]}
+          unit={formatKwh(event.total_lost_kwh).split(" ")[1]}
+          tone="warn"
+        />
+        <Stat label="Shortfall" value={`${(shortfall * 100).toFixed(0)}%`} tone="warn" />
+        <Stat label="Actual" value={event.mean_actual_kw.toFixed(1)} unit="kW" />
+        <Stat label="Expected" value={event.mean_predicted_kw.toFixed(1)} unit="kW" />
+      </section>
 
-      <div className="grid sm:grid-cols-2 gap-5">
-        <EventExplanationCard event={event} explain={explain} />
-        <RecommendedActions />
-      </div>
+      {/* ---- The reading, in plain language ---- */}
+      <section className="mt-5">
+        <Card>
+          <CardTitle>What the model saw</CardTitle>
+          <p className="text-sm leading-relaxed text-slate-300">{event.explanation}</p>
+          {event.mean_expected_lower_kw !== null && (
+            <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
+              <div className="rounded border border-slate-800 px-2 py-1.5">
+                <dt className="text-slate-500">Expected</dt>
+                <dd className="tabular-nums text-slate-200">
+                  {event.mean_predicted_kw.toFixed(1)} kW
+                </dd>
+              </div>
+              <div className="rounded border border-cyan-900/60 px-2 py-1.5">
+                <dt className="text-cyan-500/80">Lower bound of healthy range</dt>
+                <dd className="tabular-nums text-cyan-300">
+                  {event.mean_expected_lower_kw.toFixed(1)} kW
+                </dd>
+              </div>
+              <div className="rounded border border-red-900/60 px-2 py-1.5">
+                <dt className="text-red-500/80">Actual</dt>
+                <dd className="tabular-nums text-red-300">
+                  {event.mean_actual_kw.toFixed(1)} kW
+                </dd>
+              </div>
+            </dl>
+          )}
+        </Card>
+      </section>
 
-      {/* Signal detail */}
-      <Card>
-        <CardTitle>Signal detail</CardTitle>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-          <div>
-            <div className="text-slate-500 text-xs mb-1">Duration</div>
-            <div className="text-slate-200 font-mono">{event.duration_minutes} min</div>
-          </div>
-          <div>
-            <div className="text-slate-500 text-xs mb-1">Intervals flagged</div>
-            <div className="text-slate-200 font-mono">{event.interval_count}</div>
-          </div>
-          <div>
-            <div className="text-slate-500 text-xs mb-1">Peak deviation</div>
-            <div className="text-red-400 font-mono">{event.max_residual_sigma.toFixed(1)}σ</div>
-          </div>
-          <div>
-            <div className="text-slate-500 text-xs mb-1">Lost energy</div>
-            <div className="text-amber-300 font-mono">{event.total_lost_kwh.toFixed(1)} kWh</div>
-          </div>
-        </div>
-      </Card>
+      {/* ---- Chart ---- */}
+      <section className="mt-5">
+        <Card>
+          <CardTitle hint="event window highlighted">Generation through the event</CardTitle>
+          {timeseries.length ? (
+            <>
+              <GenerationChart
+                points={timeseries}
+                height={300}
+                highlightStart={event.start_time}
+                highlightEnd={event.end_time}
+              />
+              <ChartLegend />
+            </>
+          ) : (
+            <Empty>No telemetry for this window.</Empty>
+          )}
+        </Card>
+      </section>
 
-      {/* Related */}
-      <div className="flex gap-3 flex-wrap text-sm">
-        <Link href="/demo" className="text-slate-500 hover:text-slate-300 underline">← Full demo dashboard</Link>
-        {event.site_id && (
-          <Link href={`/sites/${event.site_id}`} className="text-slate-500 hover:text-slate-300 underline">
-            View site: {event.site_id} →
-          </Link>
+      {/* ---- Spatial attribution ---- */}
+      {spatial_context && (
+        <section className="mt-5">
+          <Card>
+            <CardTitle hint={`within ${spatial_context.radius_km.toFixed(0)} km`}>
+              Was it this site, or the weather?
+            </CardTitle>
+
+            <div
+              className={`rounded-lg border px-3 py-2.5 ${
+                SCOPE_STYLE[spatial_context.scope] ?? SCOPE_STYLE.indeterminate
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold">
+                  {SCOPE_HEADLINE[spatial_context.scope] ?? spatial_context.scope}
+                </span>
+                <span className="rounded bg-black/30 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+                  {spatial_context.confidence} confidence
+                </span>
+              </div>
+              <p className="mt-1.5 text-xs leading-relaxed opacity-90">
+                {spatial_context.explanation}
+              </p>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+              <Evidence
+                label="This site"
+                value={`${(spatial_context.site_normalised_residual * 100).toFixed(1)}%`}
+                hint="of nameplate vs expected"
+              />
+              <Evidence
+                label="Neighbour median"
+                value={
+                  spatial_context.neighbor_residual_median !== null
+                    ? `${(spatial_context.neighbor_residual_median * 100).toFixed(1)}%`
+                    : "—"
+                }
+                hint="same window"
+              />
+              <Evidence
+                label="Neighbours affected"
+                value={`${spatial_context.neighbors_affected} / ${spatial_context.neighbor_count}`}
+                hint="also below par"
+              />
+              <Evidence
+                label="Excess deviation"
+                value={
+                  spatial_context.excess_deviation !== null
+                    ? `${(spatial_context.excess_deviation * 100).toFixed(1)} pp`
+                    : "—"
+                }
+                hint="worse than neighbourhood"
+              />
+            </div>
+
+            {neighbor_comparison.length > 0 && (
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="text-slate-500">
+                    <tr className="border-b border-slate-800">
+                      <th className="py-1.5 pr-2 font-medium">Neighbour</th>
+                      <th className="px-2 py-1.5 text-right font-medium">Actual kW</th>
+                      <th className="px-2 py-1.5 text-right font-medium">Expected kW</th>
+                      <th className="px-2 py-1.5 text-right font-medium">Ratio</th>
+                      <th className="px-2 py-1.5 text-right font-medium">Flagged</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {neighbor_comparison.map((n) => (
+                      <tr key={n.site_id} className="border-b border-slate-800/60 last:border-0">
+                        <td className="py-1.5 pr-2">
+                          <Link
+                            href={`/sites/${n.site_id}`}
+                            className="text-slate-300 hover:text-cyan-300"
+                          >
+                            {n.name}
+                          </Link>
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">
+                          {n.actual_kw_mean.toFixed(1)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">
+                          {n.expected_kw_mean.toFixed(1)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          <span
+                            className={
+                              n.expected_ratio !== null && n.expected_ratio < 0.9
+                                ? "text-amber-400"
+                                : "text-emerald-400"
+                            }
+                          >
+                            {n.expected_ratio !== null
+                              ? `${(n.expected_ratio * 100).toFixed(0)}%`
+                              : "—"}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">
+                          {n.anomaly_intervals}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-600">
+              This is not a fault classifier. It answers only whether the deviation
+              was shared with nearby sites, and shows the evidence so you can
+              disagree with it.
+            </p>
+          </Card>
+        </section>
+      )}
+
+      {/* ---- Actions and attribution ---- */}
+      <div className="mt-5 grid gap-5 lg:grid-cols-2">
+        {recommended_actions.length > 0 && (
+          <Card>
+            <CardTitle>Suggested next steps</CardTitle>
+            <ul className="space-y-2">
+              {recommended_actions.map((action, i) => (
+                <li key={i} className="flex gap-2 text-xs leading-relaxed text-slate-300">
+                  <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-slate-800 text-[10px] text-cyan-400">
+                    {i + 1}
+                  </span>
+                  {action}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
+
+        {contributors.length > 0 && (
+          <Card>
+            <CardTitle hint="SHAP, on the expected-generation model">
+              What drove the expectation
+            </CardTitle>
+            <ul className="space-y-1.5">
+              {contributors.map((c) => (
+                <li key={c.feature} className="flex items-center gap-2 text-xs">
+                  <span className="w-40 shrink-0 truncate font-mono text-[11px] text-slate-400">
+                    {c.feature}
+                  </span>
+                  <span className="tabular-nums text-slate-600">
+                    {c.feature_value.toFixed(1)}
+                  </span>
+                  <span className="ml-auto flex items-center gap-1.5">
+                    <span
+                      className={`inline-block h-1.5 rounded ${
+                        c.direction === "positive" ? "bg-emerald-500" : "bg-red-500"
+                      }`}
+                      style={{
+                        width: `${Math.min(64, Math.abs(c.shap_value) * 2 + 6)}px`,
+                      }}
+                    />
+                    <span
+                      className={`w-14 text-right tabular-nums ${
+                        c.direction === "positive" ? "text-emerald-400" : "text-red-400"
+                      }`}
+                    >
+                      {c.shap_value > 0 ? "+" : ""}
+                      {c.shap_value.toFixed(1)}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-600">
+              These explain why the model <em>expected</em> what it did — not why
+              the array then fell short of that expectation.
+            </p>
+          </Card>
         )}
       </div>
+    </div>
+  );
+}
+
+function Evidence({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="rounded border border-slate-800 px-2 py-1.5">
+      <div className="text-[10px] uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-0.5 tabular-nums text-slate-200">{value}</div>
+      <div className="text-[10px] text-slate-600">{hint}</div>
     </div>
   );
 }

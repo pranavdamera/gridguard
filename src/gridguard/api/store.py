@@ -54,9 +54,11 @@ class ArtifactStore:
         self,
         model_dir: Path | None = None,
         data_dir: Path | None = None,
+        curated_dir: Path | None = None,
     ) -> None:
         self.model_dir = Path(model_dir or settings.model_dir)
         self.data_dir = Path(data_dir or settings.data_processed_dir)
+        self.curated_dir = Path(curated_dir or settings.data_curated_dir)
         self.manifest: ArtifactManifest | None = None
         self.bundles: dict[str, SiteBundle] = {}
         self.load_errors: list[str] = []
@@ -97,11 +99,19 @@ class ArtifactStore:
         if events_path.exists():
             bundle.events = pd.read_parquet(events_path)
 
-        for suffix in ("", "_demo"):
-            provenance_path = self.data_dir / f"telemetry_{site.site_id}{suffix}.provenance.json"
-            records = load_provenance(provenance_path)
-            if records:
-                bundle.provenance = records[0]
+        # Provenance lives beside whichever copy of the telemetry was used.
+        # Measured sites are served from the committed curated directory, so
+        # that has to be searched too — looking only in the working cache left
+        # the /data page with no measured datasets to show.
+        for directory in (self.curated_dir, self.data_dir):
+            for suffix in ("", "_demo"):
+                records = load_provenance(
+                    directory / f"telemetry_{site.site_id}{suffix}.provenance.json"
+                )
+                if records:
+                    bundle.provenance = records[0]
+                    break
+            if bundle.provenance is not None:
                 break
 
         bundle.anomaly_model = self._load_pickle(site_dir / "anomaly_detector.pkl")

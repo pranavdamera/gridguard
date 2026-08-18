@@ -49,7 +49,8 @@ class Settings(BaseSettings):
     anomaly_method: str = "conformal"
 
     # --- Modelling ----------------------------------------------------------
-    train_test_split_date: str = "2023-01-01"
+    #: Both fleets share a split date, since they now share a timeline.
+    train_test_split_date: str = "2016-10-01"
     real_train_test_split_date: str = "2016-10-01"
 
     # --- Spatial ------------------------------------------------------------

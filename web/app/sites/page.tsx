@@ -1,65 +1,85 @@
 import Link from "next/link";
-import { api } from "@/lib/api";
-import { Card } from "@/components/ui/Card";
-import { MethodologyNotice } from "@/components/MethodologyNotice";
+import { api, tryFetch } from "@/lib/api";
+import {
+  Card,
+  DataModeBadge,
+  ErrorPanel,
+} from "@/components/ui/Primitives";
 
-export const revalidate = 60;
+export const revalidate = 300;
 
 export default async function SitesPage() {
-  let sites = null;
-  let error = null;
-  try {
-    const res = await api.sites();
-    sites = res.sites;
-  } catch (e) {
-    error = (e as Error).message;
+  const { data, error } = await tryFetch(() => api.sites());
+
+  if (error || !data) {
+    return (
+      <div className="mx-auto max-w-4xl px-4 py-8">
+        <ErrorPanel error={error ?? "No sites available"} />
+      </div>
+    );
   }
 
+  const groups: { mode: "real" | "synthetic"; label: string; blurb: string }[] = [
+    {
+      mode: "real",
+      label: "Measured arrays",
+      blurb:
+        "Real installations with published system metadata and on-site weather instruments.",
+    },
+    {
+      mode: "synthetic",
+      label: "Simulated arrays",
+      blurb:
+        "Illustrative DMV campus fleet used for controlled fault injection. Not measured data.",
+    },
+  ];
+
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-slate-100">Fleet Overview</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          {sites?.length ?? 0} illustrative DC/Northern Virginia campus PV assets
+    <div className="mx-auto max-w-4xl px-4 py-8">
+      <header className="mb-6">
+        <h1 className="text-xl font-semibold tracking-tight text-slate-100">Sites</h1>
+        <p className="mt-1 text-sm text-slate-400">
+          {data.total} sites · {data.real_count} measured · {data.synthetic_count} simulated
         </p>
-      </div>
+      </header>
 
-      <div className="mb-5">
-        <MethodologyNotice />
-      </div>
+      {groups.map((group) => {
+        const sites = data.sites.filter((s) => s.data_mode === group.mode);
+        if (!sites.length) return null;
+        return (
+          <section key={group.mode} className="mb-8">
+            <div className="mb-2 flex items-center gap-2">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+                {group.label}
+              </h2>
+              <DataModeBadge mode={group.mode} />
+            </div>
+            <p className="mb-3 text-xs text-slate-500">{group.blurb}</p>
 
-      {error && (
-        <div className="text-red-400 text-sm border border-red-800 bg-red-950/30 rounded p-4 mb-6">
-          {error} — make sure the backend is running.
-        </div>
-      )}
-
-      {sites && (
-        <div className="grid sm:grid-cols-2 gap-4">
-          {sites.map((site) => (
-            <Link key={site.site_id} href={`/sites/${site.site_id}`}>
-              <Card className="hover:border-slate-500 transition-colors cursor-pointer h-full">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <div className="text-slate-200 font-medium text-sm">{site.name}</div>
-                    <div className="text-slate-500 text-xs mt-0.5">{site.region}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-cyan-300 font-mono text-sm">{site.capacity_kw} kW</div>
-                    <div className="text-slate-600 text-xs">nameplate</div>
-                  </div>
-                </div>
-                <div className="text-xs text-slate-600 font-mono">
-                  {site.latitude.toFixed(4)}° N, {Math.abs(site.longitude).toFixed(4)}° W
-                </div>
-                {site.notes && (
-                  <div className="text-slate-500 text-xs mt-2 leading-relaxed">{site.notes}</div>
-                )}
-              </Card>
-            </Link>
-          ))}
-        </div>
-      )}
+            <div className="grid gap-3 sm:grid-cols-2">
+              {sites.map((site) => (
+                <Link key={site.site_id} href={`/sites/${site.site_id}`}>
+                  <Card className="h-full transition-colors hover:border-slate-700">
+                    <h3 className="text-sm font-medium text-slate-200">{site.name}</h3>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {site.capacity_kw} kW · {site.latitude.toFixed(3)},{" "}
+                      {site.longitude.toFixed(3)}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-slate-600">
+                      {site.capacity_basis}
+                    </p>
+                    {site.notes && (
+                      <p className="mt-2 line-clamp-3 text-[11px] leading-relaxed text-slate-500">
+                        {site.notes}
+                      </p>
+                    )}
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }

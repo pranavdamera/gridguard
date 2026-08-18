@@ -1,181 +1,236 @@
-# GridGuard Deployment Guide
+# Deployment
 
-GridGuard has two deployable pieces:
-- **FastAPI backend** (Python) — deployable on Render, Railway, Fly.io, or Cloud Run
-- **Next.js frontend** (Node.js) — deployable on Vercel
+GridGuard deploys as two independent services:
+
+```
+GitHub
+  ├── Vercel  ──  Next.js frontend  (static + server components)
+  └── Render  ──  FastAPI backend   (loads prebuilt artifacts)
+```
+
+They are deployed and scaled separately, and the only coupling between them is
+one environment variable on each side.
 
 ---
 
-## Local development
+## The artifact model
 
-### Prerequisites
-
-- Python 3.11+
-- Node.js 18+
-- Git
-
-### One-time setup
+**The backend never trains.** It loads artifacts produced by a single canonical
+command and serves them:
 
 ```bash
-git clone https://github.com/pranav-damera/gridguard
+make build-artifacts      # python scripts/build_artifacts.py
+```
+
+That command verifies/loads data → preprocesses → trains → calibrates
+uncertainty → evaluates → writes `artifacts/models/manifest.json` recording the
+git commit, dataset window, hyperparameters, calibration configuration and every
+evaluation score behind the build.
+
+Artifacts are **not committed** — they total roughly 150 MB. The *curated
+measured datasets* (~3 MB) **are** committed, which is what makes this work: the
+build needs no network access and no credentials, because the real data is
+already in the repository and the simulated fleet is regenerated
+deterministically from a fixed seed.
+
+So the deployment story is simply: **run the build during the build step.**
+
+| What | Where | Size | Committed? |
+|---|---|---|---|
+| Curated measured telemetry | `data/curated/` | ~3 MB | Yes |
+| Model artifacts + calibration | `artifacts/models/` | ~150 MB | No — built at deploy |
+| Derived frames (detected, events) | `data/processed/` | ~25 MB | No — built at deploy |
+
+If your host's build step is too constrained for a full build, restrict the
+fleet:
+
+```bash
+python scripts/build_artifacts.py --mode real       # 3 sites instead of 10
+python scripts/build_artifacts.py --no-physics      # skip the pvlib models
+```
+
+---
+
+## Local
+
+```bash
+git clone https://github.com/pranavdamera/gridguard
 cd gridguard
 
-# Backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+python -m venv .venv && source .venv/bin/activate
+make install                 # backend + frontend dependencies
 
-# Frontend
-cd web && npm install && cd ..
+make build-artifacts         # once, ~4 minutes; no network needed
+
+make api                     # terminal 1 -> http://localhost:8000/docs
+make web                     # terminal 2 -> http://localhost:3000
 ```
 
-### Run the full demo locally
+Optional research dashboard (`pip install -e ".[dashboard]"` first):
 
 ```bash
-# 1. Generate artifacts (one time, then again if you want to reset)
-make demo-reset
-
-# 2. Start backend (in terminal 1)
-make api
-
-# 3. Start frontend (in terminal 2)
-make web
-
-# Open:
-#   http://localhost:3000       — public frontend
-#   http://localhost:8000/docs  — API docs
-#   http://localhost:8501       — Streamlit research dashboard (optional)
+make dashboard               # -> http://localhost:8501
 ```
 
 ---
 
-## Environment variables
+## Backend — Render
 
-### Backend (`.env`)
+A [`render.yaml`](../render.yaml) blueprint is included. Point Render's
+**New Blueprint Instance** at the repository and it will pick it up.
 
-```env
-# Data source
-DATA_SOURCE=synthetic           # "synthetic" | "nrel"
-NREL_API_KEY=DEMO_KEY           # Your NREL key if using real data
+Or configure a Web Service manually:
 
-# CORS — comma-separated origins for the frontend
-ALLOWED_ORIGINS=http://localhost:3000,https://your-vercel-app.vercel.app
+| Setting | Value |
+|---|---|
+| Runtime | Python 3.12 |
+| Build command | `pip install -e . && python scripts/build_artifacts.py` |
+| Start command | `uvicorn gridguard.api.main:app --host 0.0.0.0 --port $PORT` |
+| Health check path | `/health` |
 
-# Anomaly detection
-ANOMALY_THRESHOLD_SIGMA=2.0     # Alert threshold (z-score)
+The start command **must** bind `$PORT` — Render assigns it, and a service that
+binds a fixed port will fail its health check.
 
-# Paths (relative to repo root)
-MODEL_DIR=artifacts/models
-DATA_PROCESSED_DIR=data/processed
-```
+### Backend environment variables
 
-Copy `.env.example` to `.env` and fill in your values.
+| Variable | Required | Default | Notes |
+|---|---|---|---|
+| `CORS_ALLOWED_ORIGINS` | **Yes** | `http://localhost:3000` | Comma-separated frontend origins. Set to your Vercel production URL. |
+| `CORS_ALLOW_VERCEL_PREVIEWS` | No | `false` | Allows any `*.vercel.app` origin. Convenient for preview deploys; widens the origin set. |
+| `DATA_MODE` | No | `synthetic` | Default fleet view. Both modes always available per-site. |
+| `ANOMALY_METHOD` | No | `conformal` | `conformal` or `sigma`. |
+| `CONFORMAL_ALPHA` | No | `0.05` | Miscoverage level. |
+| `NREL_API_KEY` / `NREL_API_EMAIL` | No | unset | **Not needed.** Only for extending the fleet to a site without on-site weather instruments. |
 
-### Frontend (`web/.env.local`)
+There are no secrets in the default configuration. The real-data path reads a
+public dataset over anonymous HTTPS.
 
-```env
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-```
+### Other hosts
 
-For production, set this to your deployed backend URL.
-
----
-
-## Deploying the backend
-
-### Render (recommended for ease)
-
-1. Create a new **Web Service** on Render
-2. Connect your GitHub repo
-3. Set:
-   - Build command: `pip install -e .`
-   - Start command: `uvicorn gridguard.api.main:app --host 0.0.0.0 --port $PORT`
-   - Environment: `ALLOWED_ORIGINS=https://your-vercel-app.vercel.app`
-4. Add a Disk mount at `/opt/render/project/src/artifacts` (for model artifacts)
-
-> **Note**: You must run `make demo-reset` locally and commit/upload the generated artifacts, or run the reset script as part of the build command.
-
-### Railway
-
-```bash
-railway login
-railway init
-railway up
-```
-
-Set `ALLOWED_ORIGINS` in the Railway dashboard.
-
-### Fly.io
+Any platform that can run a Python build step and bind `$PORT` works. Fly.io:
 
 ```bash
 fly launch
+fly secrets set CORS_ALLOWED_ORIGINS="https://your-app.vercel.app"
 fly deploy
-fly secrets set ALLOWED_ORIGINS="https://your-vercel-app.vercel.app"
 ```
 
-### Docker
+Railway: same build and start commands; set the variables in the dashboard.
 
-A `Dockerfile` and `docker-compose.yml` are included:
+For production traffic, run under gunicorn with uvicorn workers:
 
 ```bash
-docker compose up -d
+gunicorn gridguard.api.main:app -k uvicorn.workers.UvicornWorker \
+  -w 2 --bind 0.0.0.0:$PORT
 ```
 
-The API will be available at `http://localhost:8000`.
-
-To generate artifacts inside Docker:
-```bash
-docker compose exec api python scripts/reset_demo.py
-```
+Two workers each hold the artifacts in memory (a few hundred MB total), so size
+the instance accordingly rather than raising the worker count freely.
 
 ---
 
-## Deploying the frontend (Vercel)
+## Frontend — Vercel
 
-### Automatic (recommended)
+1. Import the repository at [vercel.com/new](https://vercel.com/new).
+2. Set **Root Directory** to `web`. Vercel then auto-detects Next.js.
+3. Add the environment variable:
 
-1. Push the repo to GitHub
-2. Import the repo on [vercel.com](https://vercel.com)
-3. Set the **Root Directory** to `web`
-4. Set environment variable: `NEXT_PUBLIC_API_BASE_URL=https://your-backend.onrender.com`
-5. Deploy
+   | Variable | Value |
+   |---|---|
+   | `NEXT_PUBLIC_API_URL` | `https://your-service.onrender.com` |
 
-### Manual CLI
+4. Deploy.
+
+`NEXT_PUBLIC_*` variables are **inlined at build time**, so changing this value
+requires a redeploy, not just a restart. Nothing secret may go in it — it ships
+in the client bundle.
+
+Or from the CLI:
 
 ```bash
 npm install -g vercel
 cd web
+vercel env add NEXT_PUBLIC_API_URL
 vercel --prod
 ```
 
-Set the env var in Vercel dashboard or via CLI:
-```bash
-vercel env add NEXT_PUBLIC_API_BASE_URL
+---
+
+## CORS
+
+The API refuses to guess. `CORS_ALLOWED_ORIGINS` is an explicit list:
+
+```env
+CORS_ALLOWED_ORIGINS=https://gridguard.vercel.app,https://gridguard.example.com
 ```
+
+`*` is accepted but logs a warning on startup and should not be deployed —
+with credentials disabled it is not a critical vulnerability, but it does let
+any site read your API from a user's browser.
+
+Preview deployments get a fresh subdomain per branch, so they can only be
+matched by pattern. Set `CORS_ALLOW_VERCEL_PREVIEWS=true` to allow
+`https://<anything>.vercel.app` if you want previews to work against production
+data, understanding that it opens the API to every Vercel-hosted site.
 
 ---
 
-## Backend start command
-
-For any PaaS that needs an explicit start command:
+## Verifying a deployment
 
 ```bash
-uvicorn gridguard.api.main:app --host 0.0.0.0 --port $PORT
+curl https://your-service.onrender.com/health
 ```
 
-Or with gunicorn for production:
-
-```bash
-gunicorn gridguard.api.main:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
+```json
+{
+  "status": "ok",
+  "sites_loaded": 10,
+  "sites_with_models": 10,
+  "sites_with_calibration": 10,
+  "data_rows": 270921,
+  "manifest_present": true,
+  "artifact_built_at": "2026-08-18T18:42:55+00:00",
+  "artifact_commit": "98defe3...",
+  "detection_method": "conformal",
+  "warnings": []
+}
 ```
+
+Check that:
+
+- `status` is `ok`, not `degraded` (degraded means no artifacts loaded).
+- `manifest_present` is `true`.
+- `artifact_commit` matches the commit you deployed.
+- `warnings` is empty.
+
+The response deliberately contains no filesystem paths, hostnames or
+configuration values, so it is safe to expose publicly.
+
+Then load the frontend and open **/data** — if provenance renders, the frontend
+is reaching the API and the artifacts carry their provenance records.
 
 ---
 
-## Checklist before deploying
+## Docker
 
-- [ ] `make demo-reset` generates artifacts successfully
-- [ ] `pytest` passes (92 tests)
-- [ ] `cd web && npm run build` passes
-- [ ] `ALLOWED_ORIGINS` includes your frontend URL
-- [ ] `NEXT_PUBLIC_API_BASE_URL` points to your deployed backend
-- [ ] Model artifacts are committed or copied to the deployment environment
+```bash
+docker compose up -d --build
+docker compose exec api python scripts/build_artifacts.py   # first run only
+```
+
+`Dockerfile` installs dependencies in a separate layer from the source, so
+source-only changes do not reinstall the scientific stack.
+
+---
+
+## Refreshing the curated datasets
+
+Only needed to change the data window or add a measured site:
+
+```bash
+make data-real        # re-downloads from the OEDI data lake, rewrites data/curated/
+git diff --stat data/curated/
+```
+
+Review the diff before committing — these files are the repository's only
+committed data, and they are what makes a fresh clone runnable offline.
