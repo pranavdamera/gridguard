@@ -568,3 +568,47 @@ def test_loading_absent_provenance_returns_empty(tmp_path):
 def test_provenance_stamps_retrieval_time():
     record = DatasetProvenance(site_id="x", data_mode="synthetic", dataset="sim")
     assert record.retrieved_at
+
+
+# ---------------------------------------------------------------------------
+# Repository integrity
+# ---------------------------------------------------------------------------
+
+
+def test_every_source_module_is_tracked_by_git():
+    """Every file under src/ must actually be committed.
+
+    A `.gitignore` entry of `artifacts/` (unanchored) silently matched
+    `src/gridguard/artifacts/` as well, so that package was never committed.
+    Everything passed locally, where the files were on disk, and CI failed with
+    ModuleNotFoundError. Ruff also honours .gitignore, so the package was never
+    linted either — one root cause, two invisible failures.
+    """
+    import subprocess
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parent.parent
+    src_root = repo_root / "src"
+    if not (repo_root / ".git").exists():
+        pytest.skip("not a git checkout")
+
+    try:
+        tracked = subprocess.run(
+            ["git", "ls-files", "src"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pytest.skip("git unavailable")
+
+    tracked_paths = {(repo_root / p).resolve() for p in tracked}
+    on_disk = {
+        p.resolve()
+        for p in src_root.rglob("*.py")
+        if "__pycache__" not in p.parts and ".egg-info" not in str(p)
+    }
+
+    untracked = sorted(str(p.relative_to(repo_root)) for p in on_disk - tracked_paths)
+    assert not untracked, f"source files exist but are not committed: {untracked}"
