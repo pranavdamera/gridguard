@@ -30,9 +30,8 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, date
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -48,6 +47,7 @@ from gridguard.anomaly.events import group_anomaly_events
 from gridguard.api.schemas import (
     AnomalyRecord,
     AnomalyResponse,
+    DemoScenarioResponse,
     EventRecord,
     EventsResponse,
     ExplainContributor,
@@ -59,7 +59,6 @@ from gridguard.api.schemas import (
     ModelMetrics,
     SiteRecord,
     SitesResponse,
-    DemoScenarioResponse,
 )
 from gridguard.config import settings
 from gridguard.features.engineer import FEATURE_COLS, build_features
@@ -73,7 +72,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _state: dict = {
-    "models": {},           # lag-aware forecasting models (for /forecast, /metrics)
+    "models": {},  # lag-aware forecasting models (for /forecast, /metrics)
     "anomaly_model": None,  # weather-only anomaly detector (for /anomalies, /events)
     "test_df": None,
     "anomaly_df": None,
@@ -94,7 +93,9 @@ async def lifespan(app: FastAPI):
 
     _state["residual_stats"] = _load_residual_stats(model_dir)
     if _state["residual_stats"]:
-        logger.info("Loaded residual calibration stats (%d hour buckets)", len(_state["residual_stats"]))
+        logger.info(
+            "Loaded residual calibration stats (%d hour buckets)", len(_state["residual_stats"])
+        )
     else:
         logger.warning("No residual_stats.json found — run 'make demo-reset' first.")
 
@@ -124,9 +125,8 @@ async def lifespan(app: FastAPI):
             "Falling back to best forecasting model (lag leakage risk)."
         )
         # Graceful fallback so the API starts in environments without artifacts
-        _state["anomaly_model"] = (
-            _state["models"].get("xgboost")
-            or next(iter(_state["models"].values()), None)
+        _state["anomaly_model"] = _state["models"].get("xgboost") or next(
+            iter(_state["models"].values()), None
         )
 
     test_path = processed_dir / "test_df.parquet"
@@ -147,7 +147,9 @@ async def lifespan(app: FastAPI):
         # Metrics compare all lag-aware forecasting models on the held-out test set
         if _state["models"]:
             X_test, y_test = get_X_y(test_df)
-            forecast_models = {k: v for k, v in _state["models"].items() if k != "persistence" or True}
+            forecast_models = {
+                k: v for k, v in _state["models"].items() if k != "persistence" or True
+            }
             _state["metrics_df"] = compare_models(forecast_models, X_test, y_test)
             _state["best_model_name"] = _state["metrics_df"].iloc[0]["model"]
 
@@ -158,6 +160,7 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 # CORS
 # ---------------------------------------------------------------------------
+
 
 def _parse_origins(raw: str) -> list[str]:
     if raw.strip() == "*":
@@ -188,12 +191,13 @@ app.add_middleware(
 # Helper
 # ---------------------------------------------------------------------------
 
+
 def _require_data(name: str = "Data"):
     if _state["anomaly_df"] is None:
         raise HTTPException(503, f"{name} not loaded. Run 'make demo-reset && make api'.")
 
 
-def _filter_by_time(df: pd.DataFrame, start: Optional[str], end: Optional[str]) -> pd.DataFrame:
+def _filter_by_time(df: pd.DataFrame, start: str | None, end: str | None) -> pd.DataFrame:
     ts_col = "timestamp" if "timestamp" in df.columns else "start_time"
     if start:
         df = df[df[ts_col] >= pd.Timestamp(start)]
@@ -222,6 +226,7 @@ def health():
 def sites_list():
     """Return all configured DMV sites with geospatial metadata."""
     from gridguard.sites.registry import load_sites
+
     sites_dict = load_sites()
     records = [
         SiteRecord(
@@ -242,6 +247,7 @@ def sites_list():
 def site_detail(site_id: str):
     """Return metadata for a single site."""
     from gridguard.sites.registry import load_sites
+
     sites = load_sites()
     if site_id not in sites:
         raise HTTPException(404, f"Site '{site_id}' not found.")
@@ -292,9 +298,9 @@ def forecast_post(req: ForecastRequest):
 
 @app.get("/forecast", response_model=list[ForecastResponse])
 def forecast_range(
-    site_id: Optional[str] = Query(default=None),
-    start: Optional[str] = Query(default=None, description="ISO 8601 start datetime"),
-    end: Optional[str] = Query(default=None, description="ISO 8601 end datetime"),
+    site_id: str | None = Query(default=None),
+    start: str | None = Query(default=None, description="ISO 8601 start datetime"),
+    end: str | None = Query(default=None, description="ISO 8601 end datetime"),
     limit: int = Query(default=500, le=5000),
 ):
     """Return expected-generation forecast for a time window from the test dataset."""
@@ -318,9 +324,9 @@ def forecast_range(
 
 @app.get("/anomalies", response_model=AnomalyResponse)
 def anomalies(
-    site_id: Optional[str] = Query(default=None),
-    start: Optional[str] = Query(default=None, description="ISO 8601 start datetime"),
-    end: Optional[str] = Query(default=None, description="ISO 8601 end datetime"),
+    site_id: str | None = Query(default=None),
+    start: str | None = Query(default=None, description="ISO 8601 start datetime"),
+    end: str | None = Query(default=None, description="ISO 8601 end datetime"),
     limit: int = Query(default=200, le=5000),
     only_anomalies: bool = Query(default=True),
 ):
@@ -361,11 +367,11 @@ def anomalies(
 
 @app.get("/events", response_model=EventsResponse)
 def events(
-    site_id: Optional[str] = Query(default=None),
-    start: Optional[str] = Query(default=None, description="ISO 8601 start datetime"),
-    end: Optional[str] = Query(default=None, description="ISO 8601 end datetime"),
+    site_id: str | None = Query(default=None),
+    start: str | None = Query(default=None, description="ISO 8601 start datetime"),
+    end: str | None = Query(default=None, description="ISO 8601 end datetime"),
     limit: int = Query(default=50, le=500),
-    severity: Optional[str] = Query(default=None, description="Filter: low, medium, high"),
+    severity: str | None = Query(default=None, description="Filter: low, medium, high"),
 ):
     """Return anomaly intervals grouped into contiguous events."""
     edf = _state["events_df"]
@@ -471,6 +477,7 @@ def explain(
 
     try:
         from gridguard.explainability.shap_explain import explain_anomaly
+
         shap_df = explain_anomaly(model, X_row, top_n=len(present))
         contributors = [
             ExplainContributor(

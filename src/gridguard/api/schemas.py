@@ -16,7 +16,9 @@ class ForecastRequest(BaseModel):
     """Input features for a single 15-minute interval forecast."""
 
     timestamp: datetime
-    irradiance_wm2: float = Field(..., ge=0, le=1500, description="Global horizontal irradiance W/m²")
+    irradiance_wm2: float = Field(
+        ..., ge=0, le=1500, description="Global horizontal irradiance W/m²"
+    )
     temperature_c: float = Field(..., ge=-20, le=60, description="Ambient temperature °C")
     wind_speed_ms: float = Field(default=0.0, ge=0, le=50)
     ac_power_lag1: float = Field(default=0.0, ge=0, description="Previous interval AC power kW")

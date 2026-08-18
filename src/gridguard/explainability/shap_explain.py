@@ -71,7 +71,9 @@ def explain_anomaly(
     Returns a DataFrame with columns: timestamp_idx, feature, shap_value
     """
     if not SHAP_AVAILABLE:
-        return pd.DataFrame({"feature": X_anomaly.columns, "shap_value": [0.0] * len(X_anomaly.columns)})
+        return pd.DataFrame(
+            {"feature": X_anomaly.columns, "shap_value": [0.0] * len(X_anomaly.columns)}
+        )
 
     explainer = shap.TreeExplainer(model)
     sv = explainer.shap_values(X_anomaly)

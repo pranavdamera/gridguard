@@ -14,15 +14,11 @@ For NREL data, set NREL_API_KEY in your .env file first:
 import argparse
 import logging
 import sys
-from pathlib import Path
-
-# Ensure src/ is on the path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 
 from gridguard.ingestion.download import load_raw_data
 from gridguard.sites.registry import load_sites
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Download/generate GridGuard training data")
@@ -56,7 +52,9 @@ if __name__ == "__main__":
         print(f"\n{'ID':<20}  {'Name':<45}  {'Lat':>7}  {'Lon':>8}  {'Cap (kW)':>9}")
         print("-" * 96)
         for sid, s in sorted(sites.items()):
-            print(f"{sid:<20}  {s.name:<45}  {s.latitude:>7.4f}  {s.longitude:>8.4f}  {s.capacity_kw:>9.1f}")
+            print(
+                f"{sid:<20}  {s.name:<45}  {s.latitude:>7.4f}  {s.longitude:>8.4f}  {s.capacity_kw:>9.1f}"
+            )
         sys.exit(0)
 
     df = load_raw_data(source=args.source, site_id=args.site_id, demo=args.demo)

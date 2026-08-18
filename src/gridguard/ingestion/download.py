@@ -206,10 +206,9 @@ def _generate_synthetic(
     lat_rad = np.radians(latitude)
     declination = np.radians(23.45 * np.sin(np.radians(360 / 365 * (doy - 81))))
     hour_angle = np.radians(15 * (hour - 12))
-    cos_zenith = (
-        np.sin(lat_rad) * np.sin(declination)
-        + np.cos(lat_rad) * np.cos(declination) * np.cos(hour_angle)
-    )
+    cos_zenith = np.sin(lat_rad) * np.sin(declination) + np.cos(lat_rad) * np.cos(
+        declination
+    ) * np.cos(hour_angle)
     cos_zenith = np.clip(cos_zenith, 0, 1)
 
     # Clear-sky irradiance (W/m²)

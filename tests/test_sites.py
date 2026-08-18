@@ -1,6 +1,5 @@
 """Tests for site registry and site-aware synthetic generation."""
 
-
 import pytest
 
 from gridguard.sites.registry import Site, get_site, list_site_ids, load_sites
@@ -104,9 +103,9 @@ def test_different_latitudes_produce_different_irradiance():
     # Clear-sky peak (90th percentile) should be higher at lower latitude
     p90_low = df_low["irradiance_wm2"].quantile(0.90)
     p90_high = df_high["irradiance_wm2"].quantile(0.90)
-    assert p90_low > p90_high, (
-        f"lat=35 90th-pct irradiance ({p90_low:.1f}) should exceed lat=55 ({p90_high:.1f})"
-    )
+    assert (
+        p90_low > p90_high
+    ), f"lat=35 90th-pct irradiance ({p90_low:.1f}) should exceed lat=55 ({p90_high:.1f})"
 
 
 def test_capacity_scales_ac_power():

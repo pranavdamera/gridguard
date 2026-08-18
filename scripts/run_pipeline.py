@@ -11,13 +11,7 @@ Usage:
 
 import argparse
 import logging
-import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s")
-logger = logging.getLogger(__name__)
 
 from gridguard.config import settings
 from gridguard.ingestion.download import load_raw_data
@@ -25,11 +19,16 @@ from gridguard.models.baseline import ALL_MODELS
 from gridguard.models.evaluate import compare_models
 from gridguard.models.train import run_training
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s")
+logger = logging.getLogger(__name__)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Run GridGuard DMV training pipeline")
     parser.add_argument("--models", nargs="+", default=ALL_MODELS, choices=ALL_MODELS)
-    parser.add_argument("--skip-data", action="store_true", help="Skip data download if already cached")
+    parser.add_argument(
+        "--skip-data", action="store_true", help="Skip data download if already cached"
+    )
     parser.add_argument("--source", default=settings.data_source, choices=["synthetic", "nrel"])
     parser.add_argument(
         "--site-id",
@@ -53,14 +52,20 @@ def main():
     if args.site_id:
         try:
             from gridguard.sites.registry import get_site
+
             site = get_site(args.site_id)
-            logger.info("Site: %s (lat=%.4f, cap=%.0f kW)", site.name, site.latitude, site.capacity_kw)
+            logger.info(
+                "Site: %s (lat=%.4f, cap=%.0f kW)", site.name, site.latitude, site.capacity_kw
+            )
         except Exception:
             logger.info("Site ID: %s", args.site_id)
 
     # Determine the cache file name for --skip-data
-    cache_name = f"raw_{args.site_id}_demo.parquet" if (args.site_id and args.demo) else \
-                 f"raw_{args.site_id}.parquet" if args.site_id else "raw.parquet"
+    cache_name = (
+        f"raw_{args.site_id}_demo.parquet"
+        if (args.site_id and args.demo)
+        else f"raw_{args.site_id}.parquet" if args.site_id else "raw.parquet"
+    )
     cache = Path(settings.data_processed_dir) / cache_name
 
     if args.skip_data:

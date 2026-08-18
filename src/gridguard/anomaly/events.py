@@ -69,9 +69,13 @@ def group_anomaly_events(anomaly_df: pd.DataFrame) -> pd.DataFrame:
 
     # Duration = from start of first interval to end of last interval
     events["duration_minutes"] = (
-        (events["end_time"] - events["start_time"]).dt.total_seconds() / 60
-        + INTERVAL_MINUTES  # include the last interval itself
-    ).round(0).astype(int)
+        (
+            (events["end_time"] - events["start_time"]).dt.total_seconds() / 60
+            + INTERVAL_MINUTES  # include the last interval itself
+        )
+        .round(0)
+        .astype(int)
+    )
 
     events["severity"] = events["total_lost_kwh"].apply(_classify_severity)
 
@@ -87,9 +91,19 @@ def group_anomaly_events(anomaly_df: pd.DataFrame) -> pd.DataFrame:
     # Plain-English explanation for each event
     events["explanation"] = events.apply(explain_event_text, axis=1)
 
-    cols = ["event_id", "start_time", "end_time", "duration_minutes",
-            "interval_count", "total_lost_kwh", "max_residual_sigma",
-            "mean_actual_kw", "mean_predicted_kw", "severity", "explanation"]
+    cols = [
+        "event_id",
+        "start_time",
+        "end_time",
+        "duration_minutes",
+        "interval_count",
+        "total_lost_kwh",
+        "max_residual_sigma",
+        "mean_actual_kw",
+        "mean_predicted_kw",
+        "severity",
+        "explanation",
+    ]
     if "site_id" in events.columns:
         cols.append("site_id")
 
@@ -143,8 +157,16 @@ def explain_event_text(event: pd.Series | dict) -> str:
 def _empty_events_df() -> pd.DataFrame:
     return pd.DataFrame(
         columns=[
-            "event_id", "start_time", "end_time", "duration_minutes",
-            "interval_count", "total_lost_kwh", "max_residual_sigma",
-            "mean_actual_kw", "mean_predicted_kw", "severity", "explanation",
+            "event_id",
+            "start_time",
+            "end_time",
+            "duration_minutes",
+            "interval_count",
+            "total_lost_kwh",
+            "max_residual_sigma",
+            "mean_actual_kw",
+            "mean_predicted_kw",
+            "severity",
+            "explanation",
         ]
     )

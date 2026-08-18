@@ -95,7 +95,7 @@ export default function MethodologyPage() {
             <li>
               Train <code className="text-xs bg-slate-700 px-1 rounded">anomaly_detector.pkl</code> (XGBoost,
               weather-only features) on <em>healthy training intervals only</em> — injected fault rows are
-              excluded so the model cannot learn "low output is normal."
+              excluded so the model cannot learn &ldquo;low output is normal.&rdquo;
             </li>
             <li>Compute residuals (actual − predicted) on healthy training intervals.</li>
             <li>Fit per-hour-of-day (mean, std) from those residuals. Save to artifact file.</li>

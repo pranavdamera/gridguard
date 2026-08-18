@@ -17,7 +17,9 @@ from pathlib import Path
 
 import pandas as pd
 
-_REPO_ROOT = Path(__file__).parent.parent.parent.parent  # src/gridguard/sites/registry.py → repo root
+_REPO_ROOT = Path(
+    __file__
+).parent.parent.parent.parent  # src/gridguard/sites/registry.py → repo root
 _SITES_CSV = _REPO_ROOT / "config" / "sites.csv"
 
 

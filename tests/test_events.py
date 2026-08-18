@@ -44,9 +44,17 @@ def test_group_returns_dataframe(anomaly_df_fixture):
 def test_required_columns_present(anomaly_df_fixture):
     events = group_anomaly_events(anomaly_df_fixture)
     required = {
-        "event_id", "start_time", "end_time", "duration_minutes",
-        "interval_count", "total_lost_kwh", "max_residual_sigma",
-        "mean_actual_kw", "mean_predicted_kw", "severity", "explanation",
+        "event_id",
+        "start_time",
+        "end_time",
+        "duration_minutes",
+        "interval_count",
+        "total_lost_kwh",
+        "max_residual_sigma",
+        "mean_actual_kw",
+        "mean_predicted_kw",
+        "severity",
+        "explanation",
     }
     assert required.issubset(set(events.columns))
 

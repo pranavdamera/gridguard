@@ -4,7 +4,6 @@ These are integration tests that spin up the app with TestClient.
 Models don't need to be pre-loaded — the API handles graceful degradation.
 """
 
-
 from fastapi.testclient import TestClient
 
 from gridguard.api.main import app

@@ -1,6 +1,5 @@
 """Tests for anomaly detection."""
 
-import numpy as np
 import pytest
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
@@ -108,9 +107,9 @@ def test_injected_faults_detected():
     fault_anom_rate = result[result["date"].isin(fault_days)]["is_anomaly"].mean()
     normal_anom_rate = result[result["date"].isin(normal_days)]["is_anomaly"].mean()
 
-    assert fault_anom_rate > normal_anom_rate, (
-        f"Fault detection rate ({fault_anom_rate:.2%}) not higher than normal ({normal_anom_rate:.2%})"
-    )
+    assert (
+        fault_anom_rate > normal_anom_rate
+    ), f"Fault detection rate ({fault_anom_rate:.2%}) not higher than normal ({normal_anom_rate:.2%})"
 
 
 # ---------------------------------------------------------------------------
@@ -127,12 +126,12 @@ def test_weather_only_features_exclude_lag_columns():
     """
     from gridguard.anomaly.detect import ANOMALY_FEATURE_COLS
 
-    assert "ac_power_lag1" not in ANOMALY_FEATURE_COLS, (
-        "ac_power_lag1 must NOT be in the anomaly feature set"
-    )
-    assert "ac_power_lag4" not in ANOMALY_FEATURE_COLS, (
-        "ac_power_lag4 must NOT be in the anomaly feature set"
-    )
+    assert (
+        "ac_power_lag1" not in ANOMALY_FEATURE_COLS
+    ), "ac_power_lag1 must NOT be in the anomaly feature set"
+    assert (
+        "ac_power_lag4" not in ANOMALY_FEATURE_COLS
+    ), "ac_power_lag4 must NOT be in the anomaly feature set"
 
 
 def test_detect_anomalies_does_not_pass_lag_columns_to_model(trained_model_and_df):
