@@ -1,126 +1,269 @@
 import Link from "next/link";
-import { api } from "@/lib/api";
-import { Card, CardTitle } from "@/components/ui/Card";
-import { MethodologyNotice } from "@/components/MethodologyNotice";
+import { api, tryFetch } from "@/lib/api";
+import { ChartLegend, GenerationChart } from "@/components/GenerationChart";
+import {
+  Card,
+  CardTitle,
+  DataModeBadge,
+  Empty,
+  ErrorPanel,
+  ProvenanceNotice,
+  SeverityBadge,
+  Stat,
+  formatDuration,
+  formatKwh,
+  formatTimestamp,
+} from "@/components/ui/Primitives";
 
 export const revalidate = 60;
 
-interface Props {
+export default async function SiteDetailPage(props: {
   params: Promise<{ siteId: string }>;
-}
+}) {
+  const { siteId } = await props.params;
 
-export default async function SiteDetailPage({ params }: Props) {
-  const { siteId } = await params;
-  let site = null;
-  let events = null;
-  let error = null;
-
-  try {
-    [site, events] = await Promise.all([
-      api.site(siteId),
-      api.events({ site_id: siteId, limit: 10 }),
+  const [{ data: site, error }, { data: series }, { data: events }, { data: metrics }] =
+    await Promise.all([
+      tryFetch(() => api.site(siteId)),
+      tryFetch(() => api.timeseries(siteId, { limit: 900 })),
+      tryFetch(() => api.events({ site_id: siteId, limit: 10 })),
+      tryFetch(() => api.metrics(siteId)),
     ]);
-  } catch (e) {
-    error = (e as Error).message;
+
+  if (error || !site) {
+    return (
+      <div className="mx-auto max-w-5xl px-4 py-8">
+        <Link href="/demo" className="text-xs text-slate-500 hover:text-slate-300">
+          ← Fleet
+        </Link>
+        <div className="mt-3">
+          <ErrorPanel error={error ?? "Site not found"} />
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className="mb-2">
-        <Link href="/sites" className="text-xs text-slate-500 hover:text-slate-300">← All sites</Link>
-      </div>
+    <div className="mx-auto max-w-5xl px-4 py-8">
+      <Link href="/demo" className="text-xs text-slate-500 hover:text-slate-300">
+        ← Fleet
+      </Link>
 
-      {error && (
-        <div className="text-red-400 text-sm border border-red-800 bg-red-950/30 rounded p-4 mb-6">
-          {error}
+      <header className="mt-2 mb-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-100">
+            {site.name}
+          </h1>
+          <DataModeBadge mode={site.data_mode} />
         </div>
+        <p className="mt-1 text-sm text-slate-400">
+          {site.capacity_kw} kW · {site.latitude.toFixed(4)}, {site.longitude.toFixed(4)}
+          {site.tilt_deg !== null && (
+            <> · tilt {site.tilt_deg}° / azimuth {site.azimuth_deg}°</>
+          )}
+          {site.source_system_id && <> · PVDAQ system {site.source_system_id}</>}
+        </p>
+      </header>
+
+      <ProvenanceNotice mode={site.data_mode} text={site.disclaimer} />
+
+      {site.notes && (
+        <p className="mt-2 text-xs leading-relaxed text-slate-500">{site.notes}</p>
       )}
 
-      {site && (
-        <>
-          <div className="mb-6">
-            <h1 className="text-xl font-semibold text-slate-100">{site.name}</h1>
-            <p className="text-slate-500 text-sm mt-1">{site.region}</p>
-          </div>
+      {/* ---- Generation ---- */}
+      <section className="mt-5">
+        <Card>
+          <CardTitle
+            hint={
+              series
+                ? `${series.points.length} of ${series.total_points} intervals`
+                : undefined
+            }
+          >
+            Actual vs expected generation
+          </CardTitle>
+          {series && series.points.length > 0 ? (
+            <>
+              <GenerationChart points={series.points} height={320} />
+              <ChartLegend />
+              <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+                The shaded band is the calibrated range of healthy output. Actual
+                generation falling below it is what GridGuard flags — the band has
+                a stated false-alarm rate, unlike a hand-picked threshold.
+              </p>
+            </>
+          ) : (
+            <Empty>No telemetry available for this site.</Empty>
+          )}
+        </Card>
+      </section>
 
-          <div className="mb-5">
-            <MethodologyNotice />
-          </div>
+      {/* ---- Model performance ---- */}
+      {metrics && (
+        <section className="mt-5">
+          <Card>
+            <CardTitle
+              hint={
+                metrics.train_test_split_date
+                  ? `held-out from ${metrics.train_test_split_date}`
+                  : undefined
+              }
+            >
+              Model performance on held-out data
+            </CardTitle>
 
-          <div className="grid sm:grid-cols-2 gap-4 mb-6">
-            <Card>
-              <CardTitle>Site Info</CardTitle>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Site ID</span>
-                  <span className="font-mono text-slate-300">{site.site_id}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Capacity</span>
-                  <span className="text-cyan-300 font-mono">{site.capacity_kw} kW</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Latitude</span>
-                  <span className="font-mono text-slate-300">{site.latitude.toFixed(4)}° N</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Longitude</span>
-                  <span className="font-mono text-slate-300">{Math.abs(site.longitude).toFixed(4)}° W</span>
-                </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <Stat label="Best model" value={metrics.best_model} />
+              {metrics.models.slice(0, 1).map((m) => (
+                <Stat key={m.model} label="MAE" value={m.mae_kw.toFixed(2)} unit="kW" />
+              ))}
+              {metrics.models.slice(0, 1).map((m) => (
+                <Stat key={m.model} label="RMSE" value={m.rmse_kw.toFixed(2)} unit="kW" />
+              ))}
+              {metrics.models.slice(0, 1).map((m) => (
+                <Stat key={m.model} label="R²" value={m.r2.toFixed(4)} />
+              ))}
+            </div>
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="text-slate-500">
+                  <tr className="border-b border-slate-800">
+                    <th className="py-1.5 pr-2 font-medium">Forecast model (lag-aware)</th>
+                    <th className="px-2 py-1.5 text-right font-medium">MAE kW</th>
+                    <th className="px-2 py-1.5 text-right font-medium">RMSE kW</th>
+                    <th className="px-2 py-1.5 text-right font-medium">R²</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {metrics.models.map((m) => (
+                    <tr key={m.model} className="border-b border-slate-800/60 last:border-0">
+                      <td className="py-1.5 pr-2 text-slate-300">{m.model}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">
+                        {m.mae_kw.toFixed(3)}
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">
+                        {m.rmse_kw.toFixed(3)}
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">
+                        {m.r2.toFixed(4)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {metrics.weather_only_models.length > 0 && (
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="text-slate-500">
+                    <tr className="border-b border-slate-800">
+                      <th className="py-1.5 pr-2 font-medium">
+                        Expected-generation model (weather-only)
+                      </th>
+                      <th className="px-2 py-1.5 text-right font-medium">MAE kW</th>
+                      <th className="px-2 py-1.5 text-right font-medium">RMSE kW</th>
+                      <th className="px-2 py-1.5 text-right font-medium">R²</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {metrics.weather_only_models.map((m) => (
+                      <tr key={m.model} className="border-b border-slate-800/60 last:border-0">
+                        <td className="py-1.5 pr-2 text-slate-300">{m.model}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">
+                          {m.mae_kw.toFixed(3)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">
+                          {m.rmse_kw.toFixed(3)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">
+                          {m.r2.toFixed(4)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              {site.notes && (
-                <div className="text-slate-500 text-xs mt-4 leading-relaxed border-t border-slate-700 pt-3">
-                  {site.notes}
-                </div>
-              )}
-            </Card>
+            )}
 
-            <Card>
-              <CardTitle>Quick Actions</CardTitle>
-              <div className="space-y-2 text-sm">
-                <Link
-                  href={`/demo?site=${site.site_id}`}
-                  className="block px-3 py-2 bg-cyan-900/30 border border-cyan-800 text-cyan-300 rounded text-xs hover:bg-cyan-900/50 transition-colors"
-                >
-                  View demo dashboard for this site →
-                </Link>
-                <div className="text-xs text-slate-600 pt-1">
-                  Demo data is synthetic. Real-data adapters planned.
-                </div>
-              </div>
-            </Card>
-          </div>
+            {metrics.evaluation_note && (
+              <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+                {metrics.evaluation_note}
+              </p>
+            )}
 
-          {events && events.events.length > 0 && (
-            <Card>
-              <CardTitle>Recent Events ({events.total_events} total)</CardTitle>
-              <div className="space-y-2">
-                {events.events.map((evt) => (
-                  <Link
-                    key={evt.event_id}
-                    href={`/events/${evt.event_id}`}
-                    className="flex items-center gap-3 p-3 rounded border border-slate-700 hover:border-slate-500 transition-colors text-sm"
-                  >
-                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                      evt.severity === "high" ? "bg-red-900/60 text-red-300" :
-                      evt.severity === "medium" ? "bg-amber-900/60 text-amber-300" :
-                      "bg-emerald-900/60 text-emerald-300"
-                    }`}>{evt.severity}</span>
-                    <span className="text-slate-300">
-                      {new Date(evt.start_time).toLocaleDateString()} — {evt.duration_minutes} min
+            {metrics.conformal_coverage && (
+              <div className="mt-4">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                  Conformal coverage on held-out healthy intervals
+                </p>
+                <div className="mt-1.5 flex flex-wrap gap-2">
+                  {Object.entries(metrics.conformal_coverage).map(([bucket, value]) => (
+                    <span
+                      key={bucket}
+                      className="rounded border border-slate-800 px-2 py-1 text-[11px] tabular-nums text-slate-400"
+                    >
+                      {bucket}:{" "}
+                      <span
+                        className={value >= 0.95 ? "text-emerald-400" : "text-amber-400"}
+                      >
+                        {(value * 100).toFixed(1)}%
+                      </span>
                     </span>
-                    <span className="ml-auto text-amber-300 font-mono text-xs">{evt.total_lost_kwh.toFixed(1)} kWh lost</span>
-                  </Link>
-                ))}
+                  ))}
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-600">
+                  Target is ≥95%. Measured on intervals neither the model nor the
+                  calibration saw.
+                </p>
               </div>
-            </Card>
-          )}
-
-          {events && events.events.length === 0 && (
-            <div className="text-slate-500 text-sm">No anomaly events found for this site.</div>
-          )}
-        </>
+            )}
+          </Card>
+        </section>
       )}
+
+      {/* ---- Events ---- */}
+      <section className="mt-5">
+        <Card>
+          <CardTitle hint={events ? `${events.total_events} total` : undefined}>
+            Underperformance events
+          </CardTitle>
+          {!events || events.events.length === 0 ? (
+            <Empty>No events detected for this site in the evaluation window.</Empty>
+          ) : (
+            <ul className="space-y-2">
+              {events.events.map((event) => (
+                <li key={event.global_event_id ?? event.event_id}>
+                  <Link
+                    href={`/events/${encodeURIComponent(
+                      event.global_event_id ?? String(event.event_id),
+                    )}`}
+                    className="block rounded border border-slate-800 px-3 py-2 transition-colors hover:border-slate-700 hover:bg-slate-800/40"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <SeverityBadge severity={event.severity} />
+                      <span className="text-xs text-slate-400">
+                        {formatTimestamp(event.start_time)}
+                      </span>
+                      <span className="text-xs text-slate-600">
+                        {formatDuration(event.duration_minutes)}
+                      </span>
+                      <span className="ml-auto text-xs tabular-nums text-slate-400">
+                        {formatKwh(event.total_lost_kwh)}
+                      </span>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-slate-500">
+                      {event.explanation}
+                    </p>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </section>
     </div>
   );
 }

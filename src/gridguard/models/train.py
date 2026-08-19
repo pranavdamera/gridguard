@@ -69,7 +69,9 @@ def run_training(
     train_val_df = train_df.iloc[val_cutoff:].copy()
     logger.info(
         "Train-train: %d rows | Train-val: %d rows | Test: %d rows",
-        len(train_train_df), len(train_val_df), len(test_df),
+        len(train_train_df),
+        len(train_val_df),
+        len(test_df),
     )
 
     # ------------------------------------------------------------------
@@ -88,7 +90,8 @@ def run_training(
         if name == "xgboost":
             # Use validation set for early stopping — never the test set
             model.fit(
-                X_train, y_train,
+                X_train,
+                y_train,
                 eval_set=[(X_val, y_val)],
                 verbose=False,
             )
@@ -125,6 +128,7 @@ def run_training(
 
     # Use same XGBoost hyperparams but validate on the weather-only val set
     from xgboost import XGBRegressor
+
     anomaly_model = XGBRegressor(
         n_estimators=500,
         learning_rate=0.05,
@@ -138,7 +142,8 @@ def run_training(
         verbosity=0,
     )
     anomaly_model.fit(
-        X_train_w, y_train_w,
+        X_train_w,
+        y_train_w,
         eval_set=[(X_val_w, y_val_w)],
         verbose=False,
     )

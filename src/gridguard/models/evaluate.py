@@ -45,12 +45,7 @@ def evaluate_model(model, X: pd.DataFrame, y: pd.Series) -> dict:
     # MAPE on daylight hours only (irradiance > threshold avoids div-by-zero)
     daylight_mask = y > 0.1
     if daylight_mask.sum() > 0:
-        mape = (
-            np.mean(
-                np.abs((y[daylight_mask] - y_pred[daylight_mask]) / y[daylight_mask])
-            )
-            * 100
-        )
+        mape = np.mean(np.abs((y[daylight_mask] - y_pred[daylight_mask]) / y[daylight_mask])) * 100
     else:
         mape = float("nan")
 
@@ -66,7 +61,13 @@ def evaluate_model(model, X: pd.DataFrame, y: pd.Series) -> dict:
 def _metrics_from_arrays(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
     """Compute metrics from plain arrays (used inside stratified groupby)."""
     if len(y_true) == 0:
-        return {"mae_kw": np.nan, "rmse_kw": np.nan, "mape_pct": np.nan, "r2": np.nan, "n_samples": 0}
+        return {
+            "mae_kw": np.nan,
+            "rmse_kw": np.nan,
+            "mape_pct": np.nan,
+            "r2": np.nan,
+            "n_samples": 0,
+        }
     mae = mean_absolute_error(y_true, y_pred)
     rmse = mean_squared_error(y_true, y_pred) ** 0.5
     r2 = r2_score(y_true, y_pred) if len(y_true) > 1 else np.nan
@@ -210,4 +211,5 @@ def full_stratified_report(
 # Kept for backwards-compatibility (imported in tests)
 def get_X_y(df: pd.DataFrame):
     from gridguard.features.engineer import get_X_y as _get_X_y
+
     return _get_X_y(df)

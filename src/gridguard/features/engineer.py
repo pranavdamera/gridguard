@@ -116,9 +116,7 @@ def build_features(df: pd.DataFrame, include_lags: bool = True) -> pd.DataFrame:
     df["irradiance_sq"] = df["irradiance_wm2"] ** 2
 
     # Rolling irradiance (4 × 15min = 1 hour)
-    df["irradiance_roll1h"] = (
-        df["irradiance_wm2"].rolling(window=4, min_periods=1).mean()
-    )
+    df["irradiance_roll1h"] = df["irradiance_wm2"].rolling(window=4, min_periods=1).mean()
 
     if include_lags and TARGET_COL in df.columns:
         df["ac_power_lag1"] = df[TARGET_COL].shift(1).fillna(0)

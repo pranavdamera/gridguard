@@ -24,18 +24,18 @@ def test_coverage_at_least_one_minus_alpha(normal_residuals):
     bound = compute_conformal_bound(normal_residuals, alpha=alpha)
     coverage = (normal_residuals >= bound).mean()
     # Allow a tiny slack for the finite-sample correction
-    assert coverage >= (1 - alpha) - 0.02, (
-        f"Coverage {coverage:.3f} is below (1 - {alpha}) = {1 - alpha}"
-    )
+    assert (
+        coverage >= (1 - alpha) - 0.02
+    ), f"Coverage {coverage:.3f} is below (1 - {alpha}) = {1 - alpha}"
 
 
 def test_tighter_bound_at_lower_alpha(normal_residuals):
     """Lower alpha (higher coverage requirement) → smaller (more negative) bound."""
     bound_10 = compute_conformal_bound(normal_residuals, alpha=0.10)
     bound_20 = compute_conformal_bound(normal_residuals, alpha=0.20)
-    assert bound_10 <= bound_20, (
-        "alpha=0.10 requires higher coverage, so the bound should be <= alpha=0.20"
-    )
+    assert (
+        bound_10 <= bound_20
+    ), "alpha=0.10 requires higher coverage, so the bound should be <= alpha=0.20"
 
 
 def test_bound_is_negative_for_normal_residuals(normal_residuals):

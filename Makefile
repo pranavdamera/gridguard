@@ -1,63 +1,86 @@
-.PHONY: install lint test data train data-gmu train-gmu api dashboard web demo-reset clean
+.PHONY: install install-dashboard lint format test \
+        build-artifacts build-real build-synthetic data-real \
+        api web dashboard demo \
+        docker-build docker-up docker-down clean
+
+# ---------------------------------------------------------------------------
+# Setup
+# ---------------------------------------------------------------------------
 
 install:
 	pip install -e ".[dev]"
+	cd web && npm ci
+
+install-dashboard:
+	pip install -e ".[dashboard]"
+
+# ---------------------------------------------------------------------------
+# Quality gates — the same checks CI runs
+# ---------------------------------------------------------------------------
 
 lint:
-	ruff check src/ tests/ scripts/ dashboard/
-	black --check src/ tests/ scripts/ dashboard/
+	ruff check .
+	black --check .
+	cd web && npm run lint && npm run typecheck
 
 format:
-	ruff check --fix src/ tests/ scripts/ dashboard/
-	black src/ tests/ scripts/ dashboard/
+	ruff check --fix .
+	black .
 
 test:
-	pytest tests/ -v --cov=gridguard --cov-report=term-missing
+	pytest --cov=gridguard --cov-report=term-missing
 
-# Generate synthetic data (no API key needed)
-data-synthetic:
-	python scripts/download_data.py --source synthetic
+# ---------------------------------------------------------------------------
+# Artifacts
+#
+# build-artifacts is the one canonical command: it verifies/downloads data,
+# preprocesses, trains, calibrates uncertainty, evaluates, and writes a
+# manifest recording exactly what was built. The deployed backend never trains
+# — it loads what this produced.
+# ---------------------------------------------------------------------------
 
-# Download real NREL PVDAQ data (requires NREL_API_KEY in .env)
-data-nrel:
-	python scripts/download_data.py --source nrel
+build-artifacts:
+	python scripts/build_artifacts.py
 
-# Generate site-specific synthetic data for GMU Fairfax (250 kW, 38.83°N)
-data-gmu:
-	python scripts/download_data.py --source synthetic --site-id gmu_fairfax
+build-real:
+	python scripts/build_artifacts.py --mode real
 
-train:
-	python scripts/run_pipeline.py
+build-synthetic:
+	python scripts/build_artifacts.py --mode synthetic
 
-# Train using GMU Fairfax synthetic data
-train-gmu:
-	python scripts/run_pipeline.py --site-id gmu_fairfax
+# Refresh the curated measured datasets from the OEDI data lake. Only needed to
+# change the window or add a site — the curated parquet files are committed, so
+# a fresh clone runs on real data with no download.
+data-real:
+	python scripts/download_data.py --refresh-curated
+
+# ---------------------------------------------------------------------------
+# Run
+# ---------------------------------------------------------------------------
 
 api:
 	uvicorn gridguard.api.main:app --reload --host 0.0.0.0 --port 8000
 
-dashboard:
-	streamlit run dashboard/app.py --server.port 8501
-
 web:
 	cd web && npm run dev
 
-# Regenerate deterministic demo bundle (data + models + artifacts) from scratch
-demo-reset:
-	python scripts/reset_demo.py
+# Streamlit is the internal research/diagnostics surface, not the product.
+dashboard:
+	streamlit run dashboard/app.py --server.port 8501
 
-# Run API + frontend (requires separate terminals or tmux)
 demo:
-	@echo "Run in separate terminals:"
-	@echo "  make demo-reset   (once, to generate artifacts)"
-	@echo "  make api          (FastAPI backend)"
-	@echo "  make web          (Next.js frontend)"
-	@echo "  make dashboard    (Streamlit research dashboard)"
+	@echo "GridGuard — run these in separate terminals:"
 	@echo ""
-	@echo "  API docs:         http://localhost:8000/docs"
-	@echo "  Public frontend:  http://localhost:3000"
-	@echo "  Demo endpoint:    http://localhost:8000/demo/scenario"
-	@echo "  Dashboard:        http://localhost:8501"
+	@echo "  make build-artifacts   (once: builds models + calibration + manifest)"
+	@echo "  make api               -> http://localhost:8000/docs"
+	@echo "  make web               -> http://localhost:3000"
+	@echo ""
+	@echo "  Optional research dashboard:"
+	@echo "  make dashboard         -> http://localhost:8501"
+
+# ---------------------------------------------------------------------------
+# Docker
+# ---------------------------------------------------------------------------
 
 docker-build:
 	docker compose build
@@ -68,7 +91,12 @@ docker-up:
 docker-down:
 	docker compose down
 
+# ---------------------------------------------------------------------------
+# Housekeeping
+# ---------------------------------------------------------------------------
+
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null; true
 	find . -name "*.pyc" -delete
-	rm -rf .pytest_cache .coverage htmlcov artifacts/
+	rm -rf .pytest_cache .coverage coverage.xml htmlcov .ruff_cache artifacts/
+	@echo "Removed derived artifacts. data/curated/ is version-controlled and kept."

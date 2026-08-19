@@ -1,16 +1,20 @@
 """
-Data ingestion: NREL PVDAQ (real) or synthetic solar generation.
+Backwards-compatible shim over :mod:`gridguard.data`.
 
-Real data:  https://developer.nrel.gov/docs/solar/pvdaq-v3/
-Synthetic:  Physically-motivated simulator — useful when API is slow or unavailable.
+The ingestion logic moved into the ``gridguard.data`` package, which separates
+measured telemetry (:class:`~gridguard.data.sources.RealPVDataSource`) from
+simulated demonstration data
+(:class:`~gridguard.data.sources.SyntheticDMVSource`) and attaches a provenance
+record to both.
 
-Site-aware mode:
-  Pass site_id to load_raw_data() to generate data for a specific DMV site.
-  Sites are defined in config/sites.csv and loaded via gridguard.sites.registry.
-  Without a site_id the old behaviour is preserved (lat 38.8°N, 10 kW system).
+The old ``load_raw_data`` entry point is kept because notebooks, the Streamlit
+dashboard, and older scripts call it. New code should call
+:func:`gridguard.data.sources.load_site_data`, which returns provenance
+alongside the frame.
 
-TODO: Add support for Open Power System Data (https://open-power-system-data.org/)
-TODO: Add DuckDB caching layer to avoid re-downloading on reruns
+The retired ``_fetch_nrel_pvdaq`` helper targeted the PVDAQ v3 REST API, which
+NREL has decommissioned. Real data now comes from the OEDI data lake; see
+:mod:`gridguard.data.oedi`.
 """
 
 from __future__ import annotations
@@ -18,22 +22,14 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
-import requests
 
-from gridguard.config import settings
+from gridguard.data.sources import load_site_data
+from gridguard.sites.registry import list_sites
 
 logger = logging.getLogger(__name__)
 
-# Default site parameters used when no site_id is provided (backwards-compat)
-_DEFAULT_LATITUDE = 38.83  # ~Northern Virginia / DC
-_DEFAULT_CAPACITY_KW = 10.0
-
-
-# ---------------------------------------------------------------------------
-# Public entry point
-# ---------------------------------------------------------------------------
+__all__ = ["load_raw_data"]
 
 
 def load_raw_data(
@@ -41,247 +37,34 @@ def load_raw_data(
     output_dir: Path | None = None,
     site_id: str | None = None,
     demo: bool = False,
+    **kwargs,
 ) -> pd.DataFrame:
-    """Download or generate raw solar generation data and save to output_dir.
+    """Load canonical telemetry for a site. Deprecated in favour of ``load_site_data``.
 
     Args:
-        source:     "synthetic" (default) or "nrel"
-        output_dir: Directory for the parquet cache. Defaults to settings.data_processed_dir.
-        site_id:    Optional site ID from config/sites.csv.  When provided, uses
-                    site-specific latitude and capacity and caches under a separate
-                    file so multiple sites can coexist in the same output_dir.
-        demo:       When True, inject a deterministic underperformance window
-                    (2023-06-15 09:00–12:15) for demo/presentation purposes.
-                    Cached separately so it doesn't overwrite the standard dataset.
+        source:     Ignored. The data mode is a property of the site in the
+                    registry, not a per-call choice, so that a site can never be
+                    served with the wrong kind of data by accident.
+        output_dir: Cache directory.
+        site_id:    Site to load. Defaults to the first synthetic site.
+        demo:       Inject the scripted demonstration event.
 
-    Returns DataFrame with columns:
-        timestamp, ac_power_kw, irradiance_wm2, temperature_c, wind_speed_ms
-        [is_injected_fault — synthetic only]
-        [site_id — when site_id is provided]
+    Returns:
+        The canonical telemetry frame (without its provenance record).
     """
-    source = source or settings.data_source
-    output_dir = Path(output_dir or settings.data_processed_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Per-site cache so different sites don't overwrite each other; demo gets its own file
-    if site_id and demo:
-        cache_name = f"raw_{site_id}_demo.parquet"
-    elif site_id:
-        cache_name = f"raw_{site_id}.parquet"
-    else:
-        cache_name = "raw.parquet"
-    cache_path = output_dir / cache_name
-
-    if cache_path.exists():
-        logger.info("Loading cached raw data from %s", cache_path)
-        return pd.read_parquet(cache_path)
-
-    if source == "nrel":
-        df = _fetch_nrel_pvdaq()
-    else:
-        df = _generate_synthetic_dispatch(site_id=site_id, demo=demo)
-
-    if site_id:
-        df["site_id"] = site_id
-
-    df.to_parquet(cache_path, index=False)
-    logger.info("Saved %d rows to %s", len(df), cache_path)
-    return df
-
-
-# ---------------------------------------------------------------------------
-# NREL PVDAQ
-# ---------------------------------------------------------------------------
-
-
-def _fetch_nrel_pvdaq() -> pd.DataFrame:
-    """Pull 15-minute interval data from the NREL PVDAQ v3 API.
-
-    Requires a free API key: https://developer.nrel.gov/signup/
-    Set NREL_API_KEY in your .env file.
-
-    TODO: Paginate to pull multiple years; currently pulls the most recent year.
-    """
-    base_url = "https://developer.nrel.gov/api/pvdaq/v3/data_file"
-    params = {
-        "api_key": settings.nrel_api_key,
-        "system_id": settings.pvdaq_system_id,
-        "aggregate": "15",  # 15-minute intervals
-        "start_date": "2022-01-01",
-        "end_date": "2022-12-31",
-    }
-    logger.info("Fetching NREL PVDAQ system_id=%d …", settings.pvdaq_system_id)
-    resp = requests.get(base_url, params=params, timeout=60)
-    resp.raise_for_status()
-
-    from io import StringIO
-
-    df = pd.read_csv(StringIO(resp.text))
-
-    # Normalise column names — PVDAQ uses different names per system
-    col_map = {
-        "datetime": "timestamp",
-        "ac_power": "ac_power_kw",
-        "poa_irradiance": "irradiance_wm2",
-        "air_temperature": "temperature_c",
-        "wind_speed": "wind_speed_ms",
-    }
-    df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-    df = df.sort_values("timestamp").reset_index(drop=True)
-
-    _validate_schema(df)
-    return df
-
-
-# ---------------------------------------------------------------------------
-# Synthetic data generator (site-aware)
-# ---------------------------------------------------------------------------
-
-
-def _generate_synthetic_dispatch(site_id: str | None, demo: bool = False) -> pd.DataFrame:
-    """Route to site-specific or default synthetic generator."""
-    if site_id is not None:
-        from gridguard.sites.registry import get_site
-
-        site = get_site(site_id)
-        logger.info(
-            "Generating synthetic data for site '%s' (lat=%.4f, cap=%.0f kW)%s",
-            site.name,
-            site.latitude,
-            site.capacity_kw,
-            " [demo mode]" if demo else "",
-        )
-        return _generate_synthetic(
-            latitude=site.latitude,
-            system_capacity_kw=site.capacity_kw,
-            demo=demo,
+    if source is not None:
+        logger.warning(
+            "load_raw_data(source=%r) is ignored: data mode now comes from the site "
+            "registry. Call gridguard.data.sources.load_site_data instead.",
+            source,
         )
 
-    logger.info(
-        "Generating synthetic data with defaults (lat=%.2f, cap=%.0f kW). "
-        "Use --site-id for a named site.",
-        _DEFAULT_LATITUDE,
-        _DEFAULT_CAPACITY_KW,
-    )
-    return _generate_synthetic(
-        latitude=_DEFAULT_LATITUDE,
-        system_capacity_kw=_DEFAULT_CAPACITY_KW,
-        demo=demo,
-    )
+    if site_id is None:
+        synthetic = list_sites(data_mode="synthetic")
+        if not synthetic:
+            raise ValueError("No synthetic sites in the registry and no site_id given.")
+        site_id = synthetic[0].site_id
+        logger.info("No site_id given; defaulting to '%s'.", site_id)
 
-
-def _generate_synthetic(
-    start: str = "2022-01-01",
-    end: str = "2023-12-31",
-    freq: str = "15min",
-    latitude: float = _DEFAULT_LATITUDE,
-    system_capacity_kw: float = _DEFAULT_CAPACITY_KW,
-    seed: int = 42,
-    demo: bool = False,
-) -> pd.DataFrame:
-    """Generate physically-motivated 15-minute synthetic solar data.
-
-    Args:
-        latitude:           Degrees north. Affects sun elevation and seasonal swing.
-        system_capacity_kw: AC nameplate capacity of the PV system.
-        demo:               When True, inject a scripted underperformance event at
-                            2023-06-15 09:00–12:15 (70% reduction) for demo purposes.
-
-    Model:
-      1. Clear-sky irradiance from sun elevation angle at the given latitude.
-      2. Cloud attenuation with log-normal noise.
-      3. Temperature with diurnal + seasonal cycle calibrated to ~Northern Virginia.
-      4. Panel efficiency drops with temperature (0.4 %/°C above 25°C).
-      5. Injected faults: random day-long underperformance events (~5% of days).
-      6. [demo only] Scripted daylight underperformance window on 2023-06-15.
-    """
-    rng = np.random.default_rng(seed)
-    idx = pd.date_range(start, end, freq=freq)
-    n = len(idx)
-
-    # --- Sun geometry (simplified, latitude-parameterised) ---
-    doy = idx.day_of_year.values  # 1–365
-    hour = idx.hour.values + idx.minute.values / 60
-    lat_rad = np.radians(latitude)
-    declination = np.radians(23.45 * np.sin(np.radians(360 / 365 * (doy - 81))))
-    hour_angle = np.radians(15 * (hour - 12))
-    cos_zenith = (
-        np.sin(lat_rad) * np.sin(declination)
-        + np.cos(lat_rad) * np.cos(declination) * np.cos(hour_angle)
-    )
-    cos_zenith = np.clip(cos_zenith, 0, 1)
-
-    # Clear-sky irradiance (W/m²)
-    ghi_clearsky = 1000 * cos_zenith
-
-    # Cloud factor — log-normal with seasonal autocorrelation
-    cloud_base = rng.lognormal(mean=0, sigma=0.4, size=n)
-    cloud_factor = np.clip(cloud_base, 0, 1.5)
-    irradiance = np.clip(ghi_clearsky * cloud_factor, 0, 1200)
-
-    # Night-time clamp
-    irradiance[cos_zenith < 0.05] = 0.0
-
-    # --- Temperature (Northern Virginia climate profile) ---
-    # Seasonal mean 5°C in winter, 28°C in summer; diurnal swing ~±5°C
-    temp_seasonal = 16 + 11 * np.sin(np.radians(360 / 365 * (doy - 80)))
-    temp_diurnal = 5 * np.sin(np.radians(15 * (hour - 14)))
-    temperature = temp_seasonal + temp_diurnal + rng.normal(0, 1.5, n)
-
-    # --- AC power ---
-    efficiency = 1.0 - 0.004 * np.maximum(0, temperature - 25)
-    ac_power = system_capacity_kw * (irradiance / 1000) * efficiency
-    ac_power = np.clip(ac_power, 0, system_capacity_kw)
-
-    # --- Wind speed ---
-    wind_speed = np.abs(rng.normal(3.5, 1.5, n))
-
-    # --- Inject faults (anomalies) ---
-    # ~5% of days have underperformance events (soiling, partial shading, inverter trip)
-    unique_days = pd.Series(idx.date).unique()
-    fault_days = rng.choice(unique_days, size=int(0.05 * len(unique_days)), replace=False)
-    fault_mask = pd.Series(idx.date).isin(fault_days).values
-    # Fault reduces output by 40–80%
-    fault_severity = rng.uniform(0.2, 0.6, size=n)
-    ac_power = np.where(fault_mask, ac_power * fault_severity, ac_power)
-
-    # --- Demo mode: inject a scripted, deterministic underperformance window ---
-    # This is NOT a real fault — it is hardcoded for demo/presentation purposes.
-    # Window: 2023-06-15 09:00–12:15 (13 intervals at 15-min spacing).
-    # Effect: 70% reduction in AC power during peak irradiance hours.
-    if demo:
-        demo_start = pd.Timestamp("2023-06-15 09:00")
-        demo_end = pd.Timestamp("2023-06-15 12:15")
-        demo_mask = (idx >= demo_start) & (idx <= demo_end)
-        ac_power = np.where(demo_mask, ac_power * 0.30, ac_power)
-        fault_mask = fault_mask | np.asarray(demo_mask)
-        logger.info(
-            "Demo mode: injected underperformance at 2023-06-15 09:00–12:15 "
-            "(%d intervals, 70%% reduction)",
-            demo_mask.sum(),
-        )
-
-    df = pd.DataFrame(
-        {
-            "timestamp": idx,
-            "ac_power_kw": ac_power.round(4),
-            "irradiance_wm2": irradiance.round(2),
-            "temperature_c": temperature.round(2),
-            "wind_speed_ms": wind_speed.round(2),
-            "is_injected_fault": fault_mask,  # ground truth label for evaluation
-        }
-    )
-    return df
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _validate_schema(df: pd.DataFrame) -> None:
-    required = {"timestamp", "ac_power_kw", "irradiance_wm2", "temperature_c"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"Raw data is missing columns: {missing}")
+    frame, _ = load_site_data(site_id, cache_dir=output_dir, demo=demo, **kwargs)
+    return frame

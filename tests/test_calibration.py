@@ -25,7 +25,7 @@ from gridguard.anomaly.detect import (
     compute_and_save_residual_stats,
     detect_anomalies,
 )
-from gridguard.features.engineer import WEATHER_ONLY_FEATURES, build_features, get_X_y
+from gridguard.features.engineer import build_features, get_X_y
 
 
 @pytest.fixture()
@@ -34,9 +34,9 @@ def simple_model_and_splits(tmp_path):
 
     Model is trained with weather_only features — matching the anomaly pipeline.
     """
-    from gridguard.ingestion.download import _generate_synthetic
+    from tests._helpers import make_frame
 
-    full_df = _generate_synthetic(start="2022-01-01", end="2023-06-30", seed=1)
+    full_df = make_frame(start="2022-01-01", end="2023-06-30", seed=1)
     train_df = full_df[full_df["timestamp"] < "2023-01-01"].copy()
     test_df = full_df[full_df["timestamp"] >= "2023-01-01"].copy()
 
@@ -95,10 +95,7 @@ def test_frozen_stats_differ_from_self_computed(simple_model_and_splits, tmp_pat
 
     # At least one hour should differ (different seasonal data in train vs test)
     common_hours = set(frozen_stats) & set(self_computed)
-    diffs = [
-        abs(frozen_stats[h]["std"] - self_computed[h]["std"])
-        for h in common_hours
-    ]
+    diffs = [abs(frozen_stats[h]["std"] - self_computed[h]["std"]) for h in common_hours]
     assert any(d > 1e-6 for d in diffs), (
         "Frozen train stats and self-computed test stats should not be identical "
         "(train and test cover different time periods)"
@@ -112,6 +109,7 @@ def test_detect_anomalies_uses_frozen_stats_by_default(simple_model_and_splits, 
 
     # Temporarily override model_dir via the env
     import gridguard.anomaly.detect as det_mod
+
     original_load = det_mod._load_residual_stats
 
     captured = {}
@@ -137,6 +135,7 @@ def test_detect_anomalies_freeze_false_does_not_load_file(simple_model_and_split
     compute_and_save_residual_stats(train_df, model, model_dir=tmp_path)
 
     import gridguard.anomaly.detect as det_mod
+
     calls = []
     original_load = det_mod._load_residual_stats
 
@@ -169,6 +168,6 @@ def test_residual_stats_only_use_training_rows(simple_model_and_splits, tmp_path
     manual = _compute_residual_stats(train_feat[daylight])
 
     for hour in set(frozen) & set(manual):
-        assert abs(frozen[hour]["mean"] - manual[hour]["mean"]) < 1e-4, (
-            f"Hour {hour}: frozen mean differs from training mean"
-        )
+        assert (
+            abs(frozen[hour]["mean"] - manual[hour]["mean"]) < 1e-4
+        ), f"Hour {hour}: frozen mean differs from training mean"

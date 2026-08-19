@@ -1,111 +1,190 @@
 import Link from "next/link";
+import { api, tryFetch } from "@/lib/api";
+import { Card, DataModeBadge } from "@/components/ui/Primitives";
 
-const FEATURES = [
-  {
-    title: "Weather-aware forecasting",
-    body: "XGBoost and Ridge models predict expected generation from irradiance, temperature, and time features — calibrated to the DC/Northern Virginia climate.",
-  },
-  {
-    title: "Lag-leakage-free anomaly detection",
-    body: "The expected-generation baseline uses weather/time features only. No lag features — so persistent degradation isn't hidden by a model that adapted to low output.",
-  },
-  {
-    title: "Event grouping",
-    body: "Consecutive anomalous intervals are collapsed into human-readable events with duration, lost kWh, severity, and plain-English explanations.",
-  },
-  {
-    title: "SHAP explainability",
-    body: "Feature contributions are computed per event so operators know which signals — irradiance, temperature, time-of-day — drove the anomaly flag.",
-  },
-  {
-    title: "Fleet-level visibility",
-    body: "Seven illustrative DMV campus PV sites. Each site has capacity, coordinates, and can be monitored independently.",
-  },
-  {
-    title: "Research-grade transparency",
-    body: "Open model card, honest methodology page, and clear synthetic-data labeling. Built for professor outreach, internship portfolios, and peer review.",
-  },
-];
+export const revalidate = 120;
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const [{ data: fleet }, { data: sites }] = await Promise.all([
+    tryFetch(() => api.fleetSummary()),
+    tryFetch(() => api.sites()),
+  ]);
+
+  const realCount = sites?.real_count ?? 3;
+  const syntheticCount = sites?.synthetic_count ?? 7;
+  const capacity = fleet?.total_capacity_kw;
+
   return (
-    <div className="max-w-5xl mx-auto px-4 py-16">
-      {/* Hero */}
-      <div className="text-center mb-16">
-        <div className="inline-block text-xs font-mono border border-slate-700 rounded px-3 py-1 text-slate-500 mb-6">
-          Deterministic synthetic demo — GMU-style campus PV assets
-        </div>
-        <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-slate-100 mb-5 leading-tight">
-          Solar asset intelligence
-          <br />
-          <span className="text-cyan-400">for campus-scale PV</span>
-        </h1>
-        <p className="text-lg text-slate-400 max-w-2xl mx-auto mb-8 leading-relaxed">
-          GridGuard detects underperformance events in DC/Northern Virginia solar installations
-          using weather-aware forecasting, residual anomaly scoring, and operator-ready explanations.
+    <div className="mx-auto max-w-5xl px-4 py-12">
+      {/* ---- What is this, in one screen ---- */}
+      <section>
+        <p className="text-xs font-medium uppercase tracking-[0.18em] text-cyan-500">
+          Open-source spatial intelligence for distributed solar
         </p>
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+        <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-50 sm:text-4xl">
+          GridGuard forecasts what a healthy solar array{" "}
+          <span className="text-cyan-400">should</span> produce, then explains
+          why it didn&apos;t.
+        </h1>
+        <p className="mt-4 max-w-2xl text-[15px] leading-relaxed text-slate-400">
+          It learns expected generation from weather, puts a{" "}
+          <strong className="text-slate-300">calibrated uncertainty band</strong>{" "}
+          around that expectation, flags intervals that fall outside it, and uses{" "}
+          <strong className="text-slate-300">nearby sites</strong> to separate a
+          real equipment fault from a cloud that fooled the weather model.
+        </p>
+
+        <div className="mt-6 flex flex-wrap gap-3">
           <Link
             href="/demo"
-            className="px-6 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-sm font-medium transition-colors"
+            className="rounded-md bg-cyan-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-cyan-500"
           >
-            View live demo →
+            Open the live fleet →
+          </Link>
+          <Link
+            href="/data"
+            className="rounded-md border border-slate-700 px-4 py-2 text-sm text-slate-300 transition-colors hover:border-slate-600 hover:text-slate-100"
+          >
+            What data is real?
           </Link>
           <Link
             href="/methodology"
-            className="px-6 py-2.5 border border-slate-600 hover:border-slate-400 text-slate-300 rounded text-sm font-medium transition-colors"
+            className="rounded-md border border-slate-700 px-4 py-2 text-sm text-slate-300 transition-colors hover:border-slate-600 hover:text-slate-100"
           >
-            Methodology
+            How the model works
           </Link>
         </div>
-      </div>
+      </section>
 
-      {/* Demo scenario callout */}
-      <div className="border border-amber-800/60 bg-amber-950/20 rounded-lg p-5 mb-12 flex gap-4">
-        <div className="text-amber-400 text-xl shrink-0">⚡</div>
-        <div>
-          <div className="text-amber-300 font-medium text-sm mb-1">Primary demo scenario</div>
-          <div className="text-slate-400 text-sm">
-            GMU Fairfax Campus Solar Array — <strong className="text-slate-300">June 15, 2023</strong>.
-            The system detects a 70% output reduction from 09:00–12:15, estimates lost kWh,
-            and shows exactly which features drove the anomaly flag.{" "}
-            <Link href="/demo" className="text-amber-400 underline hover:text-amber-300">Jump to demo →</Link>
-          </div>
-        </div>
-      </div>
+      {/* ---- Real vs simulated, stated up front ---- */}
+      <section className="mt-10 grid gap-4 sm:grid-cols-2">
+        <Card>
+          <DataModeBadge mode="real" />
+          <h2 className="mt-2 text-sm font-semibold text-slate-200">
+            {realCount} arrays with measured telemetry
+          </h2>
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+            NIST&apos;s campus arrays in Gaithersburg, Maryland — a year of
+            15-minute generation from NREL&apos;s PVDAQ collection, paired with
+            irradiance, temperature and wind measured by instruments{" "}
+            <em>at the array itself</em>. Forecast accuracy is reported on this
+            data.
+          </p>
+        </Card>
 
-      {/* Features grid */}
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-16">
-        {FEATURES.map((f) => (
-          <div key={f.title} className="border border-slate-800 rounded-lg p-5 bg-slate-900/50">
-            <h3 className="text-slate-100 font-medium text-sm mb-2">{f.title}</h3>
-            <p className="text-slate-500 text-xs leading-relaxed">{f.body}</p>
-          </div>
-        ))}
-      </div>
+        <Card>
+          <DataModeBadge mode="synthetic" />
+          <h2 className="mt-2 text-sm font-semibold text-slate-200">
+            {syntheticCount} simulated DMV campus sites
+          </h2>
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+            A physically-modelled fleet used for controlled fault injection,
+            because measured data carries no fault labels. Institution names are
+            illustrative — no named institution supplied telemetry to this
+            project.
+          </p>
+        </Card>
+      </section>
 
-      {/* Architecture overview */}
-      <div className="border-t border-slate-800 pt-10">
-        <h2 className="text-slate-400 text-xs uppercase tracking-widest font-semibold mb-6">
-          Architecture
+      {/* ---- Why it matters ---- */}
+      <section className="mt-10">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+          The problem it solves
         </h2>
-        <div className="grid sm:grid-cols-3 gap-4 text-sm">
-          <div className="border border-slate-800 rounded p-4">
-            <div className="text-cyan-400 font-mono text-xs mb-1">Backend</div>
-            <div className="text-slate-300 font-medium mb-1">FastAPI + XGBoost</div>
-            <div className="text-slate-500 text-xs">Python · scikit-learn · SHAP · uvicorn</div>
-          </div>
-          <div className="border border-slate-800 rounded p-4">
-            <div className="text-cyan-400 font-mono text-xs mb-1">Frontend</div>
-            <div className="text-slate-300 font-medium mb-1">Next.js + Tailwind</div>
-            <div className="text-slate-500 text-xs">TypeScript · Recharts · Vercel-ready</div>
-          </div>
-          <div className="border border-slate-800 rounded p-4">
-            <div className="text-cyan-400 font-mono text-xs mb-1">Data</div>
-            <div className="text-slate-300 font-medium mb-1">Synthetic demo bundle</div>
-            <div className="text-slate-500 text-xs">NREL PVDAQ / NSRDB adapters planned</div>
-          </div>
+        <div className="mt-3 grid gap-4 sm:grid-cols-3">
+          <Explainer
+            step="1"
+            title="Underperformance is invisible"
+            body="A solar array that quietly loses 20% still produces a plausible-looking curve. Without a model of what it should have produced, nothing looks wrong."
+          />
+          <Explainer
+            step="2"
+            title="Alerts without calibration get ignored"
+            body="A threshold picked by eye has an unknown false-alarm rate. GridGuard's bound is conformal: at α = 0.05, at most ~5% of healthy intervals should breach it, with no distributional assumption."
+          />
+          <Explainer
+            step="3"
+            title="A drop is not always a fault"
+            body="If neighbouring arrays under the same sky dropped too, it was the weather, not the hardware. GridGuard checks the neighbourhood before pointing at equipment."
+          />
         </div>
+      </section>
+
+      {/* ---- Fleet snapshot ---- */}
+      {fleet && (
+        <section className="mt-10">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+            Current fleet
+          </h2>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Snapshot label="Sites" value={fleet.total_sites} />
+            <Snapshot
+              label="Capacity"
+              value={capacity ? `${(capacity / 1000).toFixed(2)} MW` : "—"}
+            />
+            <Snapshot
+              label="Needing attention"
+              value={fleet.sites_critical + fleet.sites_warning}
+              tone={fleet.sites_critical > 0 ? "bad" : "neutral"}
+            />
+            <Snapshot label="Open events" value={fleet.active_events} />
+          </div>
+        </section>
+      )}
+
+      <p className="mt-10 border-t border-slate-800 pt-4 text-xs leading-relaxed text-slate-600">
+        GridGuard is a research and engineering demonstration, not an operational
+        monitoring product. It detects and localises deviation; it does not
+        diagnose which component failed, and its detection performance is
+        characterised against injected faults rather than field-validated
+        failures.
+      </p>
+    </div>
+  );
+}
+
+function Explainer({
+  step,
+  title,
+  body,
+}: {
+  step: string;
+  title: string;
+  body: string;
+}) {
+  return (
+    <Card>
+      <div className="flex items-center gap-2">
+        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-800 text-[11px] font-semibold text-cyan-400">
+          {step}
+        </span>
+        <h3 className="text-sm font-medium text-slate-200">{title}</h3>
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-slate-400">{body}</p>
+    </Card>
+  );
+}
+
+function Snapshot({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string | number;
+  tone?: "neutral" | "bad";
+}) {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/50 px-3 py-2.5">
+      <div className="text-[11px] uppercase tracking-wide text-slate-500">
+        {label}
+      </div>
+      <div
+        className={`mt-0.5 text-lg font-semibold tabular-nums ${
+          tone === "bad" ? "text-red-400" : "text-slate-100"
+        }`}
+      >
+        {value}
       </div>
     </div>
   );

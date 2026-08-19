@@ -18,11 +18,7 @@ Usage:
 from __future__ import annotations
 
 import logging
-import sys
 from pathlib import Path
-
-# Ensure src/ is on the path when run directly
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,13 +38,13 @@ def main() -> None:
     logger.info("Site: %s  |  Seed: %d  |  Demo date: %s", DEMO_SITE_ID, SEED, DEMO_DATE)
     logger.info("=" * 60)
 
+    from gridguard.anomaly.detect import compute_daily_loss, detect_anomalies
+    from gridguard.anomaly.events import group_anomaly_events
     from gridguard.config import settings
-    from gridguard.ingestion.download import _generate_synthetic, load_raw_data
+    from gridguard.ingestion.download import load_raw_data
     from gridguard.models.baseline import ALL_MODELS
     from gridguard.models.evaluate import compare_models
     from gridguard.models.train import run_training
-    from gridguard.anomaly.detect import compute_daily_loss, detect_anomalies
-    from gridguard.anomaly.events import group_anomaly_events
     from gridguard.sites.registry import get_site
 
     model_dir = Path(settings.model_dir)
@@ -63,7 +59,9 @@ def main() -> None:
     site = get_site(DEMO_SITE_ID)
     logger.info(
         "  Site: %s  lat=%.4f  cap=%.0f kW",
-        site.name, site.latitude, site.capacity_kw,
+        site.name,
+        site.latitude,
+        site.capacity_kw,
     )
 
     # Remove any existing demo cache so we regenerate fresh
@@ -74,14 +72,23 @@ def main() -> None:
             p.unlink()
 
     df = load_raw_data(source="synthetic", site_id=DEMO_SITE_ID, demo=True)
-    logger.info("  Generated %d rows  (%s → %s)", len(df), df["timestamp"].min(), df["timestamp"].max())
+    logger.info(
+        "  Generated %d rows  (%s → %s)", len(df), df["timestamp"].min(), df["timestamp"].max()
+    )
 
     # Verify demo window is present
     demo_window = df[df["timestamp"].dt.date.astype(str) == DEMO_DATE]
-    injected = demo_window[demo_window.get("is_injected_fault", False) == True] if "is_injected_fault" in df.columns else demo_window
+    n_injected = (
+        int(demo_window["is_injected_fault"].sum())
+        if "is_injected_fault" in demo_window.columns
+        else 0
+    )
     logger.info(
-        "  Demo window (%s): %d rows, %.1f kW avg ac_power",
-        DEMO_DATE, len(demo_window), demo_window["ac_power_kw"].mean(),
+        "  Demo window (%s): %d rows, %.1f kW avg ac_power, %d injected-fault intervals",
+        DEMO_DATE,
+        len(demo_window),
+        demo_window["ac_power_kw"].mean(),
+        n_injected,
     )
 
     # ------------------------------------------------------------------
@@ -99,7 +106,10 @@ def main() -> None:
     best = metrics.iloc[0]
     logger.info(
         "  Best: %s  RMSE=%.3f kW  MAE=%.3f kW  R²=%.4f",
-        best["model"], best["rmse_kw"], best["mae_kw"], best["r2"],
+        best["model"],
+        best["rmse_kw"],
+        best["mae_kw"],
+        best["r2"],
     )
     print("\n" + "=" * 60)
     print("MODEL COMPARISON (test set)")
@@ -120,7 +130,8 @@ def main() -> None:
     total_loss = daily["lost_energy_kwh"].sum()
     logger.info(
         "  %d fault days detected, %.1f kWh estimated lost energy",
-        fault_days, total_loss,
+        fault_days,
+        total_loss,
     )
 
     # Check the demo event is visible
@@ -129,17 +140,23 @@ def main() -> None:
         d = demo_day.iloc[0]
         logger.info(
             "  Demo event (%s): %d anomaly intervals, %.2f kWh lost",
-            DEMO_DATE, int(d["anomaly_count"]), float(d["lost_energy_kwh"]),
+            DEMO_DATE,
+            int(d["anomaly_count"]),
+            float(d["lost_energy_kwh"]),
         )
     else:
-        logger.warning("  Demo date %s not found in test set — check train/test split date.", DEMO_DATE)
+        logger.warning(
+            "  Demo date %s not found in test set — check train/test split date.", DEMO_DATE
+        )
 
     # ------------------------------------------------------------------
     # Step 5: Group events and save
     # ------------------------------------------------------------------
     logger.info("Step 5/5 — Grouping anomaly events …")
     events = group_anomaly_events(adf)
-    logger.info("  %d events grouped (%d high severity)", len(events), (events["severity"] == "high").sum())
+    logger.info(
+        "  %d events grouped (%d high severity)", len(events), (events["severity"] == "high").sum()
+    )
 
     # Persist test_df for the API to load
     test_out = processed_dir / "test_df.parquet"

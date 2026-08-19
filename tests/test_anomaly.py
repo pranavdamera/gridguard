@@ -1,6 +1,5 @@
 """Tests for anomaly detection."""
 
-import numpy as np
 import pytest
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
@@ -17,9 +16,9 @@ def trained_model_and_df():
     Uses mode="weather_only" — matching the anomaly detection pipeline.
     Lag features must NOT be used here; see docs/methodology.md.
     """
-    from gridguard.ingestion.download import _generate_synthetic
+    from tests._helpers import make_frame
 
-    df = _generate_synthetic(start="2022-01-01", end="2022-03-31", seed=99)
+    df = make_frame(start="2022-01-01", end="2022-03-31", seed=99)
 
     model = Pipeline([("scaler", StandardScaler()), ("reg", Ridge())])
     X, y = get_X_y(df, mode="weather_only")
@@ -84,17 +83,17 @@ def test_injected_faults_detected():
     Trains on one random seed, evaluates on another so the model is genuinely
     surprised by the fault-day patterns (different fault days chosen by each seed).
     """
-    from gridguard.ingestion.download import _generate_synthetic
+    from tests._helpers import make_frame
 
     # Train on seed=0 — fault days are different from the test seed
     # mode="weather_only" — matches the anomaly detection pipeline
-    df_train = _generate_synthetic(start="2022-01-01", end="2022-03-31", seed=0)
+    df_train = make_frame(start="2022-01-01", end="2022-03-31", seed=0, inject_scenario=True)
     model = Pipeline([("scaler", StandardScaler()), ("reg", Ridge())])
     X, y = get_X_y(df_train, mode="weather_only")
     model.fit(X, y)
 
     # Evaluate on seed=99 — has its own (different) fault days
-    df_test = _generate_synthetic(start="2022-01-01", end="2022-03-31", seed=99)
+    df_test = make_frame(start="2022-01-01", end="2022-03-31", seed=99, inject_scenario=True)
 
     if "is_injected_fault" not in df_test.columns:
         pytest.skip("Injected fault labels not present")
@@ -108,9 +107,9 @@ def test_injected_faults_detected():
     fault_anom_rate = result[result["date"].isin(fault_days)]["is_anomaly"].mean()
     normal_anom_rate = result[result["date"].isin(normal_days)]["is_anomaly"].mean()
 
-    assert fault_anom_rate > normal_anom_rate, (
-        f"Fault detection rate ({fault_anom_rate:.2%}) not higher than normal ({normal_anom_rate:.2%})"
-    )
+    assert (
+        fault_anom_rate > normal_anom_rate
+    ), f"Fault detection rate ({fault_anom_rate:.2%}) not higher than normal ({normal_anom_rate:.2%})"
 
 
 # ---------------------------------------------------------------------------
@@ -127,12 +126,12 @@ def test_weather_only_features_exclude_lag_columns():
     """
     from gridguard.anomaly.detect import ANOMALY_FEATURE_COLS
 
-    assert "ac_power_lag1" not in ANOMALY_FEATURE_COLS, (
-        "ac_power_lag1 must NOT be in the anomaly feature set"
-    )
-    assert "ac_power_lag4" not in ANOMALY_FEATURE_COLS, (
-        "ac_power_lag4 must NOT be in the anomaly feature set"
-    )
+    assert (
+        "ac_power_lag1" not in ANOMALY_FEATURE_COLS
+    ), "ac_power_lag1 must NOT be in the anomaly feature set"
+    assert (
+        "ac_power_lag4" not in ANOMALY_FEATURE_COLS
+    ), "ac_power_lag4 must NOT be in the anomaly feature set"
 
 
 def test_detect_anomalies_does_not_pass_lag_columns_to_model(trained_model_and_df):

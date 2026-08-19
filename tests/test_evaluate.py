@@ -16,9 +16,9 @@ from gridguard.models.evaluate import (
 
 @pytest.fixture()
 def model_and_df():
-    from gridguard.ingestion.download import _generate_synthetic
+    from tests._helpers import make_frame
 
-    df = _generate_synthetic(start="2022-01-01", end="2022-06-30", seed=77)
+    df = make_frame(start="2022-01-01", end="2022-06-30", seed=77)
     model = Pipeline([("sc", StandardScaler()), ("r", Ridge())])
     X, y = get_X_y(df)
     model.fit(X, y)

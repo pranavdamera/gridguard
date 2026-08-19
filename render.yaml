@@ -1,0 +1,67 @@
+# Render blueprint for the GridGuard API.
+#
+# Deploy with Render's "New Blueprint Instance", pointed at this repository.
+#
+# Why artifacts are built during the build step rather than committed: the model
+# artifacts total ~150 MB, which does not belong in git. The curated *measured
+# datasets* (~3 MB) are committed, so this build needs no network access to the
+# data lake and no credentials — it regenerates the simulated fleet
+# deterministically and trains from there.
+#
+# The build is CPU-bound and takes a few minutes. If it exceeds the build
+# timeout on the free instance type, either raise the instance type or restrict
+# the fleet with `--mode real` (three sites instead of ten).
+
+services:
+  - type: web
+    name: gridguard-api
+    runtime: python
+    plan: starter
+    region: ohio
+    branch: main
+
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -e .
+      python scripts/build_artifacts.py
+
+    startCommand: uvicorn gridguard.api.main:app --host 0.0.0.0 --port $PORT
+
+    healthCheckPath: /health
+
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+
+      # CORS. Replace with the real frontend origin(s) before going live — the
+      # API refuses to be useful with a wildcard by design, and logs a warning
+      # if one is configured.
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+
+      # Allow Vercel preview deployments (https://<branch>-<project>.vercel.app)
+      # to call the API. Off by default because it widens the origin set to any
+      # *.vercel.app host.
+      - key: CORS_ALLOW_VERCEL_PREVIEWS
+        value: "false"
+
+      # Which fleet the API serves by default. Both are always available
+      # per-site; this only sets the default view.
+      - key: DATA_MODE
+        value: synthetic
+
+      # Detection method: "conformal" (default) or "sigma" (legacy benchmark).
+      - key: ANOMALY_METHOD
+        value: conformal
+
+      # Conformal miscoverage level. 0.05 targets a 95% one-sided interval.
+      - key: CONFORMAL_ALPHA
+        value: "0.05"
+
+      # NSRDB is NOT required. The shipped real-data pipeline uses weather
+      # measured at the array. Set these only if you extend the fleet to a site
+      # without on-site instruments.
+      # - key: NREL_API_KEY
+      #   sync: false
+      # - key: NREL_API_EMAIL
+      #   sync: false
