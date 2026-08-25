@@ -19,6 +19,9 @@ web/
 
 docs/
 tests/
+
+# The schema; the image runs on the committed stubs and never regenerates.
+proto/
 dashboard/__pycache__
 .env
 .venv

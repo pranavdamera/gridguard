@@ -1,5 +1,5 @@
 .PHONY: install install-experiments lint format test \
-        build-artifacts build-real build-synthetic data-real \
+        proto build-artifacts build-real build-synthetic data-real \
         api web diagnostics demo \
         docker-build docker-up docker-down clean
 
@@ -29,6 +29,19 @@ format:
 
 test:
 	pytest --cov=gridguard --cov-report=term-missing
+
+# ---------------------------------------------------------------------------
+# Wire contract
+#
+# The generated stubs are committed so running the project needs only the
+# protobuf runtime. Regenerate after editing proto/ — tests fail if the
+# committed stubs and the .proto have drifted apart.
+# ---------------------------------------------------------------------------
+
+proto:
+	python -m grpc_tools.protoc --proto_path=proto --python_out=src --pyi_out=src \
+	  proto/gridguard/contract/v1/telemetry.proto
+	@echo "Regenerated stubs -> src/gridguard/contract/v1/"
 
 # ---------------------------------------------------------------------------
 # Artifacts

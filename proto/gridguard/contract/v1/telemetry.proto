@@ -1,0 +1,182 @@
+// GridGuard telemetry wire contract.
+//
+// This file is the contract. It is deliberately independent of the broker that
+// carries it: MQTT is the chosen transport (see docs/architecture.md), but
+// nothing here mentions MQTT, so swapping transports later is a change to the
+// edge agent and the collector, not to the schema or to anything that reads it.
+//
+// Field-numbering discipline
+// --------------------------
+//   * 1-15 are one-byte tags on the wire. They are spent on the fields that
+//     appear in every record. 16+ costs two bytes and is used for everything
+//     that is optional or occasional.
+//   * Numbers are never reused. Removed fields go into a `reserved` block so a
+//     later schema cannot quietly reassign a number that old data still uses.
+//   * New fields are always added, never renumbered. A reader built against an
+//     older version keeps working, and protobuf preserves the fields it does
+//     not understand — a property asserted in tests, because the whole point of
+//     a versioned contract is that a partially-upgraded fleet still functions.
+//
+// Package `gridguard.v1` carries the major version. A breaking change means a
+// new package, not an edit here.
+
+syntax = "proto3";
+
+package gridguard.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_package = "com.gridguard.v1";
+option java_multiple_files = true;
+
+// ---------------------------------------------------------------------------
+// Quality
+// ---------------------------------------------------------------------------
+
+// What is known to be wrong with a measurement.
+//
+// Mirrors gridguard.domain.telemetry.QualityFlag. Values are powers of two and
+// are combined as a bitfield in `TelemetryRecord.quality`, because a sample can
+// be several of these at once and collapsing that to one enum would lose the
+// reason.
+enum QualityFlag {
+  QUALITY_FLAG_OK = 0;
+  QUALITY_FLAG_OUT_OF_RANGE = 1;
+  QUALITY_FLAG_FROZEN = 2;
+  QUALITY_FLAG_STALE = 4;
+  QUALITY_FLAG_INTERPOLATED = 8;
+  QUALITY_FLAG_MISSING = 16;
+  QUALITY_FLAG_OUT_OF_ORDER = 32;
+}
+
+// ---------------------------------------------------------------------------
+// Telemetry
+// ---------------------------------------------------------------------------
+
+// One measurement, from one asset, at one instant.
+//
+// Single-channel rather than a wide row of every reading at a site. A wide row
+// assumes all of a site's channels arrive together, which is exactly the
+// assumption that stops holding once sensors and links fail independently —
+// and telling those failures apart is what this project exists to do.
+message TelemetryRecord {
+  // Which component produced this. Required for attribution: a claim about a
+  // fault has to name a component, not just a site.
+  string asset_id = 1;
+  string site_id = 2;
+
+  // Canonical channel name, e.g. "ac_power_kw", "irradiance_wm2".
+  string channel = 3;
+
+  // Unit of `value`, carried explicitly rather than inferred from `channel`.
+  // Channel names in the upstream PVDAQ data were not a reliable guide to units
+  // — millivolt irradiance filed under an irradiance name, reactive energy
+  // filed as AC power — so units travel with the number.
+  string unit = 4;
+
+  // The measurement.
+  //
+  // `optional` is load-bearing. Without explicit presence, proto3 cannot tell
+  // an absent reading from a reading of exactly zero, and at night a PV array
+  // legitimately reports zero. Conflating those is the specific bug the domain
+  // model already forbids: a record with no value must carry QUALITY_FLAG_MISSING.
+  optional double value = 5;
+
+  // When the measurement was taken, in UTC. The authoritative instant.
+  google.protobuf.Timestamp event_time = 6;
+
+  // When it reached the collector, in UTC. Set by the collector, not the edge —
+  // an edge node's clock is not trusted to timestamp someone else's receipt.
+  // Absent on the wire from the edge; populated on arrival.
+  google.protobuf.Timestamp ingest_time = 7;
+
+  // Per-asset monotonic counter. Together with `asset_id` this is the
+  // deduplication key: an edge agent replaying a buffer after reconnecting
+  // resends records the collector may already hold, and an idempotent upsert on
+  // (asset_id, sequence) makes that replay free of side effects.
+  uint64 sequence = 8;
+
+  // Bitfield of QualityFlag values. Set by whoever first observes the problem
+  // and never cleared downstream: a consumer may decide a flagged sample is
+  // still usable, but may not decide the flag was mistaken.
+  uint32 quality = 9;
+
+  reserved 10 to 15;
+  reserved "site_name", "data_mode";
+}
+
+// A batch of records from one edge agent.
+//
+// Batching is not an optimisation detail here. An agent that has been offline
+// replays a buffer of many intervals at once, and the collector needs to know
+// that is what is happening — a burst of old event_times is a recovery, not a
+// clock problem.
+message TelemetryBatch {
+  // Schema version of the payload, e.g. "1.0". Redundant with the package name
+  // for major versions, and the only signal available for minor ones.
+  string schema_version = 1;
+
+  // Which agent sent this. Agents are not assets: one agent may report for
+  // several assets, and which agent carried a message matters when attributing
+  // a communication fault.
+  string agent_id = 2;
+  string site_id = 3;
+
+  repeated TelemetryRecord records = 4;
+
+  // When the agent emitted this batch, in UTC. Distinct from every record's
+  // event_time: a batch sent now may carry readings from hours ago.
+  google.protobuf.Timestamp sent_at = 5;
+
+  // True when this batch is a replay of buffered records after a reconnect,
+  // rather than a live send. Lets the collector distinguish recovery from a
+  // node whose clock has drifted, without inferring it from timestamps.
+  bool is_replay = 6;
+
+  // How many records the agent still holds unsent. A rising value is the
+  // signal that an agent is falling behind rather than merely quiet.
+  uint32 buffered_remaining = 7;
+}
+
+// ---------------------------------------------------------------------------
+// Node status
+// ---------------------------------------------------------------------------
+
+// Why an agent stopped reporting, as far as anyone can tell.
+enum NodeState {
+  NODE_STATE_UNSPECIFIED = 0;
+  NODE_STATE_ONLINE = 1;
+  // Published as an MQTT last-will message: the broker emits it when the
+  // agent's connection drops without a clean disconnect. This is the reason
+  // MQTT was chosen over gRPC streaming — it gives a correct "this node
+  // dropped" signal with no polling and no code, and that event is precisely
+  // the phenomenon under study.
+  NODE_STATE_OFFLINE_UNEXPECTED = 2;
+  // The agent said goodbye before going away.
+  NODE_STATE_OFFLINE_CLEAN = 3;
+  // Reporting, but behind: buffering rather than delivering live.
+  NODE_STATE_DEGRADED = 4;
+}
+
+// An agent's liveness, published separately from telemetry.
+//
+// Separate because the two answer different questions and fail independently:
+// "is the plant generating" and "can we still hear the node". A design that
+// infers the second from the absence of the first cannot distinguish a dark
+// site from a deaf one.
+message NodeStatus {
+  string agent_id = 1;
+  string site_id = 2;
+  NodeState state = 3;
+  google.protobuf.Timestamp observed_at = 4;
+
+  // Free text for an operator. Never parsed.
+  string detail = 5;
+
+  // Records held locally and not yet delivered.
+  uint32 buffered_records = 6;
+
+  // Sequence of the newest record the agent has successfully delivered, so a
+  // collector can tell how far behind the agent is without waiting for a batch.
+  uint64 last_delivered_sequence = 7;
+}

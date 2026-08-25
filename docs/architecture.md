@@ -62,8 +62,38 @@ src/gridguard/
 ├── explainability/        SHAP attribution
 ├── artifacts/manifest.py  Build manifest
 ├── pipeline.py            build_site() — the per-site build
-└── api/                   FastAPI app, schemas, artifact store
+├── api/                   FastAPI app, schemas, artifact store
+│
+├── domain/                ── Vocabulary ───────────────────────────────
+│   ├── ids.py             Derived identifiers, stable across processes
+│   ├── asset.py           Assets and the site tree
+│   ├── telemetry.py       event_time / ingest_time, quality flags
+│   └── fault.py           Categories and fault hypotheses
+│
+├── simulation/            ── Layered simulator ────────────────────────
+│   ├── clock.py           Logical clock; simulated time is generated
+│   ├── config.py          Config + per-layer random streams
+│   ├── environment.py     Layer 1 — weather ground truth
+│   ├── equipment.py       Layer 2 — per-asset generation ground truth
+│   ├── sensing.py         Layer 3 — what instruments report
+│   ├── transport.py       Layer 4 — what reaches the collector
+│   ├── faults.py          Faults routed to their owning layer
+│   └── runner.py          Wires the layers; truth / observed / delivered
+│
+├── contract/              ── Wire contract ────────────────────────────
+│   ├── v1/                Generated protobuf stubs (committed)
+│   ├── codec.py           Domain record ↔ wire record
+│   └── bridge.py          Simulator frames ↔ narrow wire records
+│
+└── analysis/diagnostics.py  Offline research diagnostics
 ```
+
+The schema itself lives outside the package, at
+`proto/gridguard/contract/v1/telemetry.proto`, because it is a contract rather
+than an implementation detail — a second language binding would generate from
+the same file. Stubs are committed so running the project needs only the
+`protobuf` runtime; `make proto` regenerates them and a test fails if the two
+have drifted apart.
 
 ---
 
