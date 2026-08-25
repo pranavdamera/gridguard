@@ -32,6 +32,13 @@ dependencies = [
 experiments = [
     "matplotlib>=3.8,<4",
 ]
+# The collector service: MQTT client and the Postgres driver. Not needed by the
+# API (which reads prebuilt artifacts), the pipeline, or the web application, so
+# it stays out of those images.
+collector = [
+    "paho-mqtt>=2,<3",
+    "psycopg[binary]>=3.1,<4",
+]
 dev = [
     "pytest>=8,<10",
     "pytest-cov>=5,<8",

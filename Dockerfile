@@ -55,3 +55,16 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD python -c "import sys,urllib.request;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=5).status==200 else 1)"
 
 CMD ["uvicorn", "gridguard.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# ---------------------------------------------------------------------------
+# collector — subscribes to the broker and writes what arrives.
+#
+# Its own stage so the MQTT client and the Postgres driver stay out of the API
+# image, which needs neither: the API reads prebuilt artifacts.
+# ---------------------------------------------------------------------------
+FROM base AS collector
+
+RUN python -c "import tomllib,pathlib;p=pathlib.Path('pyproject.toml');d=tomllib.loads(p.read_text())['project']['optional-dependencies']['collector'];pathlib.Path('/tmp/collector.txt').write_text(chr(10).join(d))" \
+ && pip install -r /tmp/collector.txt
+
+CMD ["python", "scripts/run_collector.py"]

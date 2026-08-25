@@ -6,6 +6,11 @@
 # calibration and manifest artifacts; the API that serves them; and the web
 # application. The API never trains — `artifacts` is what trains, once, and the
 # API waits for it to finish successfully before starting.
+#
+# The distributed path — broker, database, collector — is behind a profile,
+# because it is the live-ingestion stack rather than the demo:
+#
+#   docker compose --profile live up
 
 name: gridguard
 
@@ -70,3 +75,56 @@ services:
       api:
         condition: service_healthy
     restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  # Live ingestion. Behind the `live` profile — the default demo serves
+  # prebuilt artifacts and needs none of this.
+  # ---------------------------------------------------------------------
+  broker:
+    profiles: ["live"]
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+    restart: unless-stopped
+
+  db:
+    profiles: ["live"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: gridguard
+      POSTGRES_USER: gridguard
+      # Local-only demo credential on a private compose network with no port
+      # published. Not a secret, and deliberately not read from a committed
+      # file — a real deployment supplies this through its own secret store.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gridguard}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gridguard -d gridguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  collector:
+    profiles: ["live"]
+    build:
+      context: .
+      target: collector
+    environment:
+      GRIDGUARD_MQTT_HOST: broker
+      GRIDGUARD_STORE_DSN: >-
+        postgresql://gridguard:${POSTGRES_PASSWORD:-gridguard}@db:5432/gridguard
+    depends_on:
+      db:
+        condition: service_healthy
+      broker:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  mosquitto_data:
+  postgres_data:

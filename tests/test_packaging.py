@@ -151,3 +151,48 @@ def test_removed_dependencies_stay_removed(unused: str):
     _, third_party = _import_graph(ENTRY_POINTS)
     assert unused not in third_party
     assert unused not in _declared_dependencies()
+
+
+def _optional_dependencies(extra: str) -> set[str]:
+    project = tomllib.loads(PYPROJECT.read_text())["project"]
+    return {
+        re.split(r"[<>=!~\[]", spec)[0].strip().lower().replace("_", "-")
+        for spec in project["optional-dependencies"][extra]
+    }
+
+
+def test_collector_imports_are_covered_by_its_extra():
+    """The collector is deployed code with its own image, so it gets the same guard.
+
+    Its dependencies live in the `collector` extra rather than the core set,
+    because the API reads prebuilt artifacts and needs neither an MQTT client
+    nor a database driver. That split only holds if what the collector imports
+    is actually declared somewhere.
+    """
+    declared = _declared_dependencies() | _optional_dependencies("collector")
+    _, third_party = _import_graph(
+        ["gridguard.collector.collector", "gridguard.collector.store", "gridguard.collector.mqtt"]
+    )
+
+    assert third_party, "import graph walk found nothing"
+    undeclared = {
+        top: _distributions_for(top)
+        for top in sorted(third_party)
+        if not any(dist in declared for dist in _distributions_for(top))
+    }
+    assert not undeclared, (
+        f"imported by the collector but declared nowhere: {undeclared}. "
+        "Add them to [project.optional-dependencies] collector."
+    )
+
+
+def test_the_api_image_does_not_need_the_collector_dependencies():
+    """The whole point of the split: keep psycopg and paho out of the API image.
+
+    Both are imported lazily inside functions, so reaching them from the API's
+    module-level graph would mean an import moved to the top of a file and
+    quietly widened what every API container has to install.
+    """
+    _, api_third_party = _import_graph(["gridguard.api.main"])
+    assert "psycopg" not in api_third_party
+    assert "paho" not in api_third_party

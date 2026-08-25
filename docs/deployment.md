@@ -224,6 +224,27 @@ That is the whole thing. Three services start in order:
 | `api` | Waits for `artifacts` to exit successfully, then serves them on :8000. |
 | `web` | Waits for `api` to report healthy, then serves the frontend on :3000. |
 
+### The live-ingestion profile
+
+```bash
+docker compose --profile live up      # adds broker, db, collector
+```
+
+Three notes on what that stack is and is not:
+
+- **The Postgres password is a documented default**, not a secret:
+  `POSTGRES_PASSWORD` defaults to `gridguard` for a container on a private
+  compose network with no published port. It is listed in `.env.example` and is
+  meant to be overridden for anything beyond a local demo.
+- **The broker publishes port 1883** so an agent running on the host can reach
+  it. Mosquitto is configured with `allow_anonymous true`, which is appropriate
+  for a single-host demo and is not appropriate for anything reachable from a
+  network you do not control. A real deployment needs TLS and per-agent
+  credentials.
+- **Broker persistence is on.** Without it, restarting the broker discards
+  in-flight QoS-1 messages, and the agent's at-least-once delivery quietly
+  becomes at-most-once.
+
 ### How dependencies are installed
 
 `Dockerfile` extracts its dependency list *from* `pyproject.toml` at build time

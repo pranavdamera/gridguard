@@ -92,8 +92,27 @@ src/gridguard/
 │   ├── screening.py       Local clear-sky screen (works disconnected)
 │   └── agent.py           ingest → check → buffer → publish → acknowledge
 │
+├── collector/             ── Ingestion ────────────────────────────────
+│   ├── store.py           Idempotent upserts; SQLite and Postgres
+│   ├── collector.py       Wire batch → store; stamps arrival
+│   ├── metrics.py         Arrival lag, completeness, agent health
+│   └── mqtt.py            MQTT publisher and subscriber
+│
 └── analysis/diagnostics.py  Offline research diagnostics
 ```
+
+### Running the live path
+
+`docker compose up` serves the demo from prebuilt artifacts and needs no broker
+or database. The distributed path is behind a profile:
+
+```bash
+docker compose --profile live up      # adds broker, db, collector
+```
+
+The split is deliberate. The demo has to work on a laptop with three services;
+the ingestion stack is what the degradation experiments run against and is not
+needed to look at results.
 
 The schema itself lives outside the package, at
 `proto/gridguard/contract/v1/telemetry.proto`, because it is a contract rather
