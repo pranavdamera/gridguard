@@ -61,8 +61,9 @@ class RealPVDataSource(DataSource):
     weather for this purpose (it is what the array actually experienced) and it
     means the real-data path needs no API credentials at all.
 
-    :class:`NSRDBWeatherSource` remains available for systems that do *not*
-    carry on-site instrumentation, but is not used by the curated dataset.
+    Extending the fleet to a system without on-site instruments would require a
+    separate weather source; none is shipped, because none of the curated
+    systems needs one.
     """
 
     def __init__(self, interval_minutes: int = 15) -> None:

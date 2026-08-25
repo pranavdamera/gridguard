@@ -210,18 +210,13 @@ single fleet view can show both. Without alignment one fleet would always report
 
 ---
 
-## Optional: NSRDB
+## Sites without on-site instruments
 
-[`src/gridguard/data/nsrdb.py`](../src/gridguard/data/nsrdb.py) implements NSRDB
-PSM v3 access for PV systems that report generation but carry **no on-site
-weather instrumentation**. GridGuard's shipped fleet does not need it.
+Every curated system publishes co-located irradiance, ambient temperature and
+wind, so GridGuard needs no external weather source and **no API credentials of
+any kind**.
 
-If you extend the fleet to such a site:
-
-```env
-NREL_API_KEY=your-key        # free: https://developer.nrel.gov/signup/
-NREL_API_EMAIL=you@example.com
-```
-
-The module raises rather than falling back to a demonstration key, which would
-silently rate-limit. No key is committed anywhere in this repository.
+Extending the fleet to a system that reports generation but carries no weather
+instrumentation would require adding one — NREL's NSRDB is the obvious
+candidate. GridGuard deliberately ships no such integration rather than carrying
+an unused, untested code path against a credentialed API.

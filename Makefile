@@ -1,7 +1,7 @@
 .PHONY: install install-dashboard lint format test \
         build-artifacts build-real build-synthetic data-real \
         api web dashboard demo \
-        docker-build docker-up docker-down clean
+        docker-build docker-up docker-down docker-research clean
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -82,6 +82,9 @@ demo:
 # Docker
 # ---------------------------------------------------------------------------
 
+# `docker compose up` is the whole demo: it builds artifacts once, then starts
+# the API and the web app in dependency order.
+
 docker-build:
 	docker compose build
 
@@ -89,7 +92,11 @@ docker-up:
 	docker compose up -d
 
 docker-down:
-	docker compose down
+	docker compose down -v
+
+# Adds the Streamlit research surface on :8501. Not part of the default path.
+docker-research:
+	docker compose --profile research up -d
 
 # ---------------------------------------------------------------------------
 # Housekeeping

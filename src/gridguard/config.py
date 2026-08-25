@@ -21,10 +21,6 @@ class Settings(BaseSettings):
     real_data_start: str = "2016-01-01"
     real_data_end: str = "2016-12-31"
 
-    #: NSRDB is optional and unused by the shipped pipeline; see data/nsrdb.py.
-    nrel_api_key: str = ""
-    nrel_api_email: str = ""
-
     # --- Paths (relative to repo root, resolved at runtime) -----------------
     model_dir: Path = Path("artifacts/models")
     report_dir: Path = Path("artifacts/reports")

@@ -100,7 +100,6 @@ binds a fixed port will fail its health check.
 | `DATA_MODE` | No | `synthetic` | Default fleet view. Both modes always available per-site. |
 | `ANOMALY_METHOD` | No | `conformal` | `conformal` or `sigma`. |
 | `CONFORMAL_ALPHA` | No | `0.05` | Miscoverage level. |
-| `NREL_API_KEY` / `NREL_API_EMAIL` | No | unset | **Not needed.** Only for extending the fleet to a site without on-site weather instruments. |
 
 There are no secrets in the default configuration. The real-data path reads a
 public dataset over anonymous HTTPS.
@@ -214,12 +213,37 @@ is reaching the API and the artifacts carry their provenance records.
 ## Docker
 
 ```bash
-docker compose up -d --build
-docker compose exec api python scripts/build_artifacts.py   # first run only
+docker compose up
 ```
 
-`Dockerfile` installs dependencies in a separate layer from the source, so
-source-only changes do not reinstall the scientific stack.
+That is the whole thing. Three services start in order:
+
+| Service | Role |
+| --- | --- |
+| `artifacts` | One-shot. Trains, calibrates, evaluates, writes the manifest, exits. |
+| `api` | Waits for `artifacts` to exit successfully, then serves them on :8000. |
+| `web` | Waits for `api` to report healthy, then serves the frontend on :3000. |
+
+The Streamlit research surface is behind a profile and is not part of the
+default path:
+
+```bash
+docker compose --profile research up      # adds :8501
+```
+
+### How dependencies are installed
+
+`Dockerfile` extracts its dependency list *from* `pyproject.toml` at build time
+rather than restating it. This is deliberate. The previous version kept a
+hand-maintained copy, and it had drifted: it omitted `pvlib` and `scipy` while
+installing `lightgbm`, which nothing imports. Because `gridguard.api.main`
+imports `pvlib` transitively at module level, the image could not start the API
+at all. `tests/test_packaging.py` now asserts both halves of the invariant — the
+API's import graph is fully declared, and the Dockerfile does not pin
+requirements inline.
+
+Dependencies still install in their own layer, so source-only changes do not
+reinstall the scientific stack.
 
 ---
 

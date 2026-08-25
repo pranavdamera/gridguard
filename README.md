@@ -144,9 +144,9 @@ supplied telemetry to this project. Every simulated surface says so.
 
 The legacy `developer.nrel.gov/api/pvdaq/v3` REST API has been **decommissioned**.
 The data remains public through the OEDI data lake, which is what GridGuard
-reads. NSRDB is implemented ([`data/nsrdb.py`](src/gridguard/data/nsrdb.py)) for
-sites without on-site instruments, but is **not** on the shipped path and needs
-no key for anything GridGuard ships.
+reads. Because every curated system carries its own weather instruments, no
+satellite or reanalysis weather source is needed, and nothing GridGuard ships
+requires an API key.
 
 Three details that matter, because getting them wrong produces plausible but
 wrong numbers:
