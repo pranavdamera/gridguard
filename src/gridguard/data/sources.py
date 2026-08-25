@@ -165,6 +165,7 @@ class RealPVDataSource(DataSource):
             start=str(frame["timestamp"].min()),
             end=str(frame["timestamp"].max()),
             timezone_note=offset_note,
+            utc_offset_hours=utc_offset,
             row_count=len(frame),
             weather_source=(
                 "Instruments co-located with the array (published in the same PVDAQ record)"

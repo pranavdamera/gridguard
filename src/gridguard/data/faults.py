@@ -58,6 +58,8 @@ from enum import StrEnum
 import numpy as np
 import pandas as pd
 
+from gridguard.domain.fault import FaultCategory, category_for
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,6 +72,19 @@ class FaultType(StrEnum):
     SENSOR_DROPOUT = "sensor_dropout"
     COMM_DROPOUT = "comm_dropout"
     CLIPPING = "clipping"
+
+
+#: What kind of thing failed, orthogonal to whether generation was lost.
+#:
+#: ``GENERATION_LOSS_FAULTS`` answers "should the detector fire?"; category
+#: answers "what broke?". Both are needed: a frozen pyranometer and a dead radio
+#: link are both non-loss conditions, and an operator responds to them
+#: completely differently. The mapping lives in
+#: :mod:`gridguard.domain.fault` so the vocabulary does not depend on the
+#: injection machinery.
+def fault_category(fault_type: FaultType | str) -> FaultCategory:
+    """Which of equipment/sensor/communication/environmental this class is."""
+    return category_for(str(fault_type))
 
 
 #: Classes that represent genuine lost generation the detector should flag.

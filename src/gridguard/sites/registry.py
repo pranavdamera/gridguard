@@ -27,8 +27,11 @@ from pathlib import Path
 
 import pandas as pd
 
+from gridguard.domain.asset import Asset, AssetKind, AssetTree
+
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent  # src/gridguard/sites/ -> repo root
 _SITES_CSV = _REPO_ROOT / "config" / "sites.csv"
+_ASSETS_CSV = _REPO_ROOT / "config" / "assets.csv"
 
 #: Shown wherever synthetic data is presented to a human.
 SYNTHETIC_DISCLAIMER = (
@@ -174,3 +177,81 @@ def sites_as_records(csv_path: Path | None = None) -> list[dict]:
         }
         for s in sorted(load_sites(csv_path).values(), key=lambda s: s.site_id)
     ]
+
+
+# ---------------------------------------------------------------------------
+# Assets
+#
+# A site is a geographic and electrical grouping; assets are the components
+# inside it that can fail independently. The two files are kept separate so
+# that adding structure never risks perturbing the site records the rest of the
+# project already depends on.
+# ---------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=1)
+def load_assets(csv_path: Path | None = None) -> dict[str, AssetTree]:
+    """Return ``{site_id: AssetTree}``, cached after first load."""
+    path = Path(csv_path) if csv_path else _ASSETS_CSV
+    if not path.exists():
+        raise FileNotFoundError(f"Asset registry not found at {path}")
+
+    df = pd.read_csv(path)
+    required = {"asset_id", "site_id", "kind", "capacity_kw"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"{path} is missing required columns: {sorted(missing)}")
+
+    by_site: dict[str, list[Asset]] = {}
+    for _, row in df.iterrows():
+        kind = str(row["kind"]).strip()
+        try:
+            asset_kind = AssetKind(kind)
+        except ValueError:
+            raise ValueError(
+                f"Asset '{row['asset_id']}' has kind={kind!r}; expected one of "
+                f"{sorted(k.value for k in AssetKind)}."
+            ) from None
+
+        parent = row.get("parent_id")
+        asset = Asset(
+            asset_id=str(row["asset_id"]),
+            site_id=str(row["site_id"]),
+            kind=asset_kind,
+            name=str(row.get("name", "") or ""),
+            parent_id=str(parent) if isinstance(parent, str) and parent.strip() else None,
+            capacity_kw=_optional_float(row.get("capacity_kw")),
+            tilt_deg=_optional_float(row.get("tilt_deg")),
+            azimuth_deg=_optional_float(row.get("azimuth_deg")),
+            telemetry_column=(
+                str(row["telemetry_column"])
+                if isinstance(row.get("telemetry_column"), str)
+                and str(row["telemetry_column"]).strip()
+                else None
+            ),
+            notes=str(row.get("notes", "") or ""),
+        )
+        by_site.setdefault(asset.site_id, []).append(asset)
+
+    return {
+        site_id: AssetTree(site_id=site_id, assets=tuple(assets))
+        for site_id, assets in by_site.items()
+    }
+
+
+def assets_for_site(site_id: str, csv_path: Path | None = None) -> AssetTree:
+    """The asset tree for one site. Raises KeyError if the site has none."""
+    trees = load_assets(csv_path)
+    if site_id not in trees:
+        raise KeyError(f"No assets registered for site '{site_id}'. Known: {sorted(trees)}")
+    return trees[site_id]
+
+
+def primary_asset_id(site_id: str, csv_path: Path | None = None) -> str:
+    """The asset that whole-site telemetry is attributed to.
+
+    Legacy frames carry one power channel per site with no asset dimension. That
+    measurement was always the site as a whole, and the largest array is the
+    least misleading asset to attribute it to until per-asset telemetry exists.
+    """
+    return assets_for_site(site_id, csv_path).primary_array.asset_id

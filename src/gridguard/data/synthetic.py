@@ -200,6 +200,7 @@ def generate_site_telemetry(
         timezone_note=(
             f"Local standard time, fixed UTC{UTC_OFFSET_HOURS:+d}, no daylight-saving shift."
         ),
+        utc_offset_hours=UTC_OFFSET_HOURS,
         row_count=len(frame),
         weather_source="Simulated (pvlib Ineichen clear-sky with autoregressive cloud attenuation)",
         irradiance_kind="plane-of-array (modelled)",
