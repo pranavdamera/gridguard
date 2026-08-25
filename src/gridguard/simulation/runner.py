@@ -36,11 +36,13 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from gridguard.data.schema import validate_canonical
+from gridguard.domain.asset import AssetKind
 from gridguard.domain.telemetry import event_time_to_local
 from gridguard.simulation.clock import LogicalClock
 from gridguard.simulation.config import SimulationConfig
 from gridguard.simulation.environment import EnvironmentLayer, EnvironmentTruth
 from gridguard.simulation.equipment import EquipmentLayer, EquipmentTruth
+from gridguard.simulation.faults import FaultSchedule, build_layered_scenario
 from gridguard.simulation.sensing import Observation, SensorLayer
 from gridguard.simulation.transport import Delivery, TransportLayer
 from gridguard.sites.registry import assets_for_site, get_site
@@ -57,12 +59,29 @@ class SiteSimulation:
     equipment: EquipmentTruth
     observation: Observation
     delivery: Delivery
+    schedule: FaultSchedule = field(default_factory=FaultSchedule)
 
     def truth_frame(self) -> pd.DataFrame:
-        """Ground truth: weather and per-asset generation, joined on time."""
+        """Ground truth: weather, per-asset generation, and every active fault.
+
+        Carries all three fault columns — equipment, sensor and communication —
+        because the whole point of the layering is that they are different
+        things. An attribution engine is scored against this frame; nothing that
+        reads it is allowed to be fed to a detector.
+        """
         weather = self.environment.to_frame()
         generation = self.equipment.to_frame()
-        return generation.merge(weather, on=["event_time", "site_id"], how="left")
+        frame = generation.merge(weather, on=["event_time", "site_id"], how="left")
+
+        per_interval = pd.DataFrame(
+            {
+                "event_time": self.observation.event_time,
+                "active_sensor_fault": self.observation.active_sensor_fault,
+                "active_comm_fault": self.delivery.active_comm_fault,
+                "delivered": self.delivery.delivered,
+            }
+        )
+        return frame.merge(per_interval, on="event_time", how="left")
 
     def observed_frame(self) -> pd.DataFrame:
         return self.observation.to_frame()
@@ -161,6 +180,45 @@ class SimulationResult:
         for tick in self.clock:
             yield tick, by_time.get(pd.Timestamp(tick.event_time), frame.iloc[0:0])
 
+    def schedule(self) -> FaultSchedule:
+        """Every fault injected across the fleet."""
+        return FaultSchedule(tuple(f for s in self.sites.values() for f in s.schedule))
+
+    def fault_summary(self) -> pd.DataFrame:
+        """Per fault: what was injected, and what it actually cost.
+
+        ``lost_kwh`` is exact rather than modelled — it is the recorded gap
+        between potential and actual generation over the fault window, which
+        exists only because the equipment layer keeps both.
+        """
+        rows = []
+        for site_id, sim in self.sites.items():
+            for fault in sim.schedule:
+                window = fault.mask(sim.equipment.event_time)
+                interval_hours = self.config.interval_minutes / 60.0
+                lost = float(
+                    (sim.equipment.site_potential_kw - sim.equipment.site_actual_kw)[window].sum()
+                    * interval_hours
+                )
+                undelivered = int((~sim.delivery.delivered)[window].sum())
+                rows.append(
+                    {
+                        "site_id": site_id,
+                        "asset_id": fault.asset_id,
+                        "fault_type": fault.fault_type.value,
+                        "category": fault.category.value,
+                        "layer": fault.layer,
+                        "start": fault.start,
+                        "end": fault.end,
+                        "intervals": int(window.sum()),
+                        "severity": fault.severity,
+                        "is_generation_loss": fault.is_generation_loss,
+                        "lost_kwh": round(lost, 2),
+                        "undelivered_intervals": undelivered,
+                    }
+                )
+        return pd.DataFrame(rows)
+
     def observation_error(self) -> pd.DataFrame:
         """How far each observed channel sits from the truth it reports on.
 
@@ -220,16 +278,42 @@ class FleetSimulator:
         sites = {}
         for site_id in self.config.site_ids:
             sites[site_id] = self.run_site(site_id, clock)
-        return SimulationResult(config=self.config, clock=clock, sites=sites)
+        result = SimulationResult(config=self.config, clock=clock, sites=sites)
+        if self.config.inject_faults:
+            logger.info("Injected %d fault(s) across the fleet.", len(result.schedule()))
+        return result
+
+    def _schedule_for(self, site_id: str, clock: LogicalClock) -> FaultSchedule:
+        """The fault schedule for one site, attached to its real assets."""
+        if not self.config.inject_faults:
+            return FaultSchedule()
+
+        tree = assets_for_site(site_id)
+        pyranometers = tree.of_kind(AssetKind.PYRANOMETER)
+        return build_layered_scenario(
+            {
+                "array": tree.primary_array.asset_id,
+                "pyranometer": (
+                    pyranometers[0].asset_id if pyranometers else tree.primary_array.asset_id
+                ),
+                # The communication fault belongs to the link carrying the
+                # site's telemetry. There is no link asset yet — the edge agent
+                # in phase 5 introduces one — so it attaches to the reporting
+                # asset, which is what a collector would blame today.
+                "link": tree.primary_array.asset_id,
+            },
+            clock.index(),
+        )
 
     def run_site(self, site_id: str, clock: LogicalClock) -> SiteSimulation:
         site = get_site(site_id)
         tree = assets_for_site(site_id)
+        schedule = self._schedule_for(site_id, clock)
 
         environment = EnvironmentLayer(site, self.config).run(clock)
-        equipment = EquipmentLayer(tree, self.config).run(environment)
-        observation = SensorLayer(tree, self.config).run(environment, equipment)
-        delivery = TransportLayer(self.config).run(observation)
+        equipment = EquipmentLayer(tree, self.config, schedule).run(environment)
+        observation = SensorLayer(tree, self.config, schedule).run(environment, equipment)
+        delivery = TransportLayer(self.config, schedule).run(observation)
 
         return SiteSimulation(
             site_id=site_id,
@@ -237,6 +321,7 @@ class FleetSimulator:
             equipment=equipment,
             observation=observation,
             delivery=delivery,
+            schedule=schedule,
         )
 
 

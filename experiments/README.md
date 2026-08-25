@@ -68,6 +68,52 @@ transition and retains the output of each.
 what happened and what was reported. A phase 8 attribution experiment scores a
 sensor fault against that baseline rather than estimating it.
 
+### Injected faults
+
+`--inject-faults` schedules the full taxonomy against each site's real assets.
+The key difference from the batch injector in `gridguard.data.faults` is that a
+fault is applied by **the layer whose behaviour it changes**:
+
+| Fault | Layer | What it changes |
+| --- | --- | --- |
+| `complete_outage`, `partial_outage`, `persistent_derate`, `gradual_degradation` | equipment | Asset state, and therefore real generation |
+| `shading` | equipment | Real generation, within the same hours each day |
+| `clipping` | equipment | AC cap. Healthy behaviour, not a fault |
+| `sensor_dropout` | sensing | A channel freezes. Ground truth untouched |
+| `comm_dropout` | transport | Records never arrive. Truth *and* observation untouched |
+
+That routing is the whole point. Rewriting `ac_power_kw` to `NaN` for a lost
+message — which is what a single-frame injector must do — makes it
+indistinguishable from a dead inverter that reported honestly. The information
+that tells them apart is destroyed at the moment of injection. Here the plant
+keeps generating, the meter keeps reading correctly, and only delivery changes.
+
+`result.fault_summary()` reports what each fault actually cost. `lost_kwh` is
+exact rather than modelled: it is the recorded gap between potential and actual
+generation, which exists only because the equipment layer keeps both.
+
+Two results in that table are worth reading carefully:
+
+- **`sensor_dropout` and `comm_dropout` cost 0 kWh.** Correct — neither touches
+  the plant.
+- **`clipping` costs real energy but is not a generation loss.** Not a
+  contradiction. `is_generation_loss` means "the detector should flag this",
+  which is false for clipping; it is not a claim that no energy was withheld.
+
+Two defaults in the scenario builder exist because the obvious version of each
+silently tested nothing:
+
+- Fault windows are anchored to solar noon. Placed by tick arithmetic alone they
+  landed mostly at night, where a fault costs nothing and exercises no detector —
+  shading cost exactly zero, and a 45% partial outage over twelve hours cost 9 kWh.
+- The clipping cap is a percentile of the array's *own* daylight potential, not a
+  fraction of nameplate. These arrays peak near 75% of DC nameplate after derate
+  and temperature losses, and how far below varies with tilt and latitude, so a
+  nameplate-relative cap engaged at some sites and sat above the peak at others.
+
+These are **simulated failure modes, not observed field incidents.** No rate
+derived from them describes real equipment.
+
 ### Speed and reproducibility
 
 A run is a pure function of `(SimulationConfig, seed)` — no wall-clock, no

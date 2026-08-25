@@ -29,10 +29,17 @@ from enum import StrEnum
 import numpy as np
 import pandas as pd
 
+from gridguard.data.faults import FaultType
 from gridguard.data.synthetic import performance_drift
 from gridguard.domain.asset import Asset, AssetKind, AssetTree
 from gridguard.simulation.config import SimulationConfig, stream_for
 from gridguard.simulation.environment import EnvironmentTruth
+from gridguard.simulation.faults import (
+    DAYLIGHT_THRESHOLD_WM2,
+    FaultSchedule,
+    FaultSpec,
+    equipment_multiplier,
+)
 
 #: Cell temperature rise above ambient at full irradiance, in °C. The simple
 #: linear proxy the shipped generator uses, kept identical.
@@ -69,6 +76,10 @@ class AssetGeneration:
     #: Cell temperature (°C), retained because it drives the derate and is
     #: useful evidence when attributing a thermal fault.
     cell_temperature_c: np.ndarray
+
+    #: Which fault class was active per interval, empty string where none. This
+    #: is the answer key an attribution engine is scored against.
+    active_fault: np.ndarray
 
     @property
     def lost_kw(self) -> np.ndarray:
@@ -109,6 +120,7 @@ class EquipmentTruth:
                         "lost_ac_power_kw": asset.lost_kw,
                         "cell_temperature_c": asset.cell_temperature_c,
                         "equipment_state": asset.state,
+                        "active_fault": asset.active_fault,
                     }
                 )
             )
@@ -118,9 +130,15 @@ class EquipmentTruth:
 class EquipmentLayer:
     """Turns weather into per-asset ground-truth generation."""
 
-    def __init__(self, tree: AssetTree, config: SimulationConfig) -> None:
+    def __init__(
+        self,
+        tree: AssetTree,
+        config: SimulationConfig,
+        schedule: FaultSchedule | None = None,
+    ) -> None:
         self.tree = tree
         self.config = config
+        self.schedule = schedule or FaultSchedule()
 
     def run(self, environment: EnvironmentTruth) -> EquipmentTruth:
         arrays = self.tree.of_kind(AssetKind.ARRAY)
@@ -157,13 +175,9 @@ class EquipmentLayer:
         potential = capacity * (irradiance / 1000.0) * efficiency * settings.system_derate * drift
         potential = np.clip(potential, 0.0, capacity)
 
-        # Phase 2 injects no equipment faults: every asset is healthy, and
-        # actual equals potential. The fault taxonomy is applied by
-        # gridguard.data.faults, which phase 3 moves into this layer so that a
-        # fault becomes a change of equipment *state* rather than an edit to a
-        # column of numbers.
-        actual = potential.copy()
-        state = np.full(n, EquipmentState.HEALTHY.value, dtype=object)
+        actual, state, active_fault = self._apply_faults(
+            array, environment.event_time, irradiance, potential, capacity
+        )
 
         return AssetGeneration(
             asset_id=array.asset_id,
@@ -173,4 +187,75 @@ class EquipmentLayer:
             actual_ac_power_kw=actual,
             state=state,
             cell_temperature_c=cell_temperature,
+            active_fault=active_fault,
         )
+
+    def _apply_faults(
+        self,
+        array: Asset,
+        event_time: pd.DatetimeIndex,
+        irradiance: np.ndarray,
+        potential: np.ndarray,
+        capacity: float,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Turn scheduled equipment faults into real generation loss.
+
+        A fault here is a change of *state*: the asset goes offline or derated,
+        and the loss is the gap between what it could have produced and what it
+        did. That gap is recorded rather than inferred, which is what makes
+        lost-energy ground truth exact.
+        """
+        n = len(event_time)
+        actual = potential.copy()
+        state = np.full(n, EquipmentState.HEALTHY.value, dtype=object)
+        active_fault = np.full(n, "", dtype=object)
+
+        faults = [f for f in self.schedule.for_layer("equipment") if f.asset_id == array.asset_id]
+        if not faults:
+            return actual, state, active_fault
+
+        daylight = irradiance > DAYLIGHT_THRESHOLD_WM2
+        for fault in faults:
+            window = fault.mask(event_time)
+            if not window.any():
+                continue
+
+            if fault.fault_type is FaultType.CLIPPING:
+                # Not a fault: the inverter caps AC output below the array's DC
+                # potential. Included so evaluation can measure whether the
+                # detector correctly stays silent through healthy behaviour.
+                if fault.cap_percentile is not None:
+                    daylight_potential = potential[daylight]
+                    cap = (
+                        float(np.percentile(daylight_potential, fault.cap_percentile))
+                        if len(daylight_potential)
+                        else capacity
+                    )
+                else:
+                    cap = capacity * (1.0 - fault.severity)
+                clipped = window & (actual > cap)
+                actual[clipped] = cap
+                self._label(state, active_fault, clipped, EquipmentState.DERATED, fault)
+                continue
+
+            factor = equipment_multiplier(fault, event_time, irradiance)
+            changed = window & daylight & (factor < 1.0)
+            actual *= factor
+
+            offline = changed & (factor == 0.0)
+            derated = changed & (factor > 0.0)
+            self._label(state, active_fault, offline, EquipmentState.OFFLINE, fault)
+            self._label(state, active_fault, derated, EquipmentState.DERATED, fault)
+
+        return np.clip(actual, 0.0, None), state, active_fault
+
+    @staticmethod
+    def _label(
+        state: np.ndarray,
+        active_fault: np.ndarray,
+        mask: np.ndarray,
+        new_state: EquipmentState,
+        fault: FaultSpec,
+    ) -> None:
+        state[mask] = new_state.value
+        active_fault[mask] = fault.fault_type.value

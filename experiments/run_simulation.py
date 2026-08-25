@@ -5,7 +5,7 @@ Run the layered site simulator.
     python experiments/run_simulation.py --days 7
     python experiments/run_simulation.py --site nist_roof --site gmu_fairfax --seed 3
     python experiments/run_simulation.py --days 1 --speedup 2000 --replay  # paced demo
-    python experiments/run_simulation.py --days 30 --out artifacts/reports/sim
+    python experiments/run_simulation.py --days 90 --inject-faults
 
 Writes three views of the run, kept separate on purpose:
 
@@ -77,6 +77,12 @@ def main() -> int:
         help="After computing, replay the run tick by tick at --speedup. "
         "For demos; experiments do not need it.",
     )
+    parser.add_argument(
+        "--inject-faults",
+        action="store_true",
+        help="Inject the full fault taxonomy, attached to each site's real assets. "
+        "Off by default: a baseline run is a healthy fleet.",
+    )
     parser.add_argument("--out", type=Path, default=Path(settings.report_dir) / "simulation")
     parser.add_argument("--no-write", action="store_true", help="Report only; write nothing.")
     args = parser.parse_args()
@@ -99,6 +105,7 @@ def main() -> int:
         interval_minutes=args.interval_minutes,
         seed=args.seed,
         speedup=args.speedup,
+        inject_faults=args.inject_faults,
     )
 
     started = time.monotonic()
@@ -149,6 +156,25 @@ def main() -> int:
     print("\nObservation error — how far the instruments sit from the truth:")
     print(result.observation_error().to_string(index=False))
 
+    faults = result.fault_summary()
+    if not faults.empty:
+        print("\nInjected faults (simulated failure modes, not observed incidents):")
+        print(
+            faults[
+                [
+                    "site_id",
+                    "asset_id",
+                    "fault_type",
+                    "category",
+                    "layer",
+                    "intervals",
+                    "lost_kwh",
+                    "undelivered_intervals",
+                ]
+            ].to_string(index=False)
+        )
+        summary["faults"] = faults.to_dict("records")
+
     if args.replay:
         logger.info(
             "Replaying %d ticks at speedup=%s ...",
@@ -190,6 +216,8 @@ def main() -> int:
     if not args.no_write:
         args.out.mkdir(parents=True, exist_ok=True)
         truth.to_parquet(args.out / "truth.parquet", index=False)
+        if not faults.empty:
+            faults.to_csv(args.out / "faults.csv", index=False)
         observed.to_parquet(args.out / "observed.parquet", index=False)
         canonical.to_parquet(args.out / "canonical.parquet", index=False)
         (args.out / "run.json").write_text(json.dumps(summary, indent=2) + "\n")

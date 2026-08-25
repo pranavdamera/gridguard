@@ -24,6 +24,7 @@ changing what the plant did.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import numpy as np
@@ -34,6 +35,9 @@ from gridguard.domain.telemetry import QualityFlag
 from gridguard.simulation.config import SimulationConfig, stream_for
 from gridguard.simulation.environment import EnvironmentTruth
 from gridguard.simulation.equipment import EquipmentTruth
+from gridguard.simulation.faults import FaultSchedule, apply_sensor_fault
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -63,6 +67,10 @@ class Observation:
     irradiance_quality: np.ndarray
     power_quality: np.ndarray
 
+    #: Which sensor fault was active per interval, empty where none. Ground
+    #: truth for attribution, not something a detector may read.
+    active_sensor_fault: np.ndarray
+
     def to_frame(self) -> pd.DataFrame:
         return pd.DataFrame(
             {
@@ -76,6 +84,7 @@ class Observation:
                 "power_asset_id": self.power_asset_id,
                 "irradiance_quality": self.irradiance_quality,
                 "power_quality": self.power_quality,
+                "active_sensor_fault": self.active_sensor_fault,
             }
         )
 
@@ -83,9 +92,15 @@ class Observation:
 class SensorLayer:
     """Turns ground truth into what the instruments report about it."""
 
-    def __init__(self, tree: AssetTree, config: SimulationConfig) -> None:
+    def __init__(
+        self,
+        tree: AssetTree,
+        config: SimulationConfig,
+        schedule: FaultSchedule | None = None,
+    ) -> None:
         self.tree = tree
         self.config = config
+        self.schedule = schedule or FaultSchedule()
 
     def _instrument(self, kind: AssetKind, fallback: str) -> str:
         assets = self.tree.of_kind(kind)
@@ -139,10 +154,37 @@ class SensorLayer:
                 np.round(observed_power / settings.power_quantum_kw) * settings.power_quantum_kw
             )
 
-        # Phase 2 injects no sensor faults, so every reading is a real reading.
-        # The columns exist now so that phase 3 sets flags rather than adding a
-        # schema, and so a consumer written today already handles them.
-        ok = np.full(n, int(QualityFlag.OK), dtype=np.int64)
+        # --- sensor faults ---------------------------------------------------
+        # These change what is *reported*. Ground truth is not passed to the
+        # fault functions and cannot be reached from here, which is what makes
+        # "a sensor fault cannot change the plant" structural rather than a
+        # convention someone has to remember.
+        irradiance_quality = np.full(n, int(QualityFlag.OK), dtype=np.int64)
+        power_quality = np.full(n, int(QualityFlag.OK), dtype=np.int64)
+        active_sensor_fault = np.full(n, "", dtype=object)
+
+        for fault in self.schedule.for_layer("sensing"):
+            window = fault.mask(environment.event_time)
+            if not window.any():
+                continue
+
+            if fault.asset_id == pyranometer:
+                observed_irradiance = apply_sensor_fault(
+                    fault, environment.event_time, observed_irradiance
+                )
+                irradiance_quality[window] |= int(QualityFlag.FROZEN)
+            elif fault.asset_id == power_asset:
+                observed_power = apply_sensor_fault(fault, environment.event_time, observed_power)
+                power_quality[window] |= int(QualityFlag.FROZEN)
+            else:
+                logger.warning(
+                    "Sensor fault on %s does not match any instrument of %s; ignored.",
+                    fault.asset_id,
+                    site_id,
+                )
+                continue
+
+            active_sensor_fault[window] = fault.fault_type.value
 
         return Observation(
             site_id=site_id,
@@ -154,6 +196,7 @@ class SensorLayer:
             irradiance_asset_id=pyranometer,
             power_asset_id=power_asset,
             weather_asset_id=weather_station,
-            irradiance_quality=ok,
-            power_quality=ok.copy(),
+            irradiance_quality=irradiance_quality,
+            power_quality=power_quality,
+            active_sensor_fault=active_sensor_fault,
         )

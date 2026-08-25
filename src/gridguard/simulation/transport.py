@@ -44,6 +44,7 @@ import pandas as pd
 
 from gridguard.domain.telemetry import QualityFlag
 from gridguard.simulation.config import SimulationConfig
+from gridguard.simulation.faults import FaultSchedule, delivery_mask
 from gridguard.simulation.sensing import Observation
 
 
@@ -63,6 +64,9 @@ class Delivery:
     delivered: np.ndarray
     quality: np.ndarray
 
+    #: Which communication fault was active per interval, empty where none.
+    active_comm_fault: np.ndarray
+
     @property
     def arrival_lag_seconds(self) -> np.ndarray:
         return (self.ingest_time - self.event_time).total_seconds().to_numpy()
@@ -81,42 +85,62 @@ class TransportLayer:
     quietly producing lossless output that a caller would read as evidence.
     """
 
-    def __init__(self, config: SimulationConfig) -> None:
+    def __init__(self, config: SimulationConfig, schedule: FaultSchedule | None = None) -> None:
         self.config = config
+        self.schedule = schedule or FaultSchedule()
 
     def run(self, observation: Observation) -> Delivery:
         settings = self.config.transport
         if not settings.is_pass_through:
             raise NotImplementedError(
-                "Lossy transport is not implemented until phase 5. This configuration "
-                f"requests loss_rate={settings.loss_rate}, "
+                "Stochastic transport degradation is not implemented until phase 5. "
+                f"This configuration requests loss_rate={settings.loss_rate}, "
                 f"mean_delay_seconds={settings.mean_delay_seconds}, "
                 f"reorder={settings.reorder}. Refusing rather than returning lossless "
-                "output that would be mistaken for a result."
+                "output that would be mistaken for a result. Scheduled comm_dropout "
+                "faults are supported and do work — see simulation.faults."
             )
 
         n = len(observation.event_time)
         # Combine the per-channel sensor flags: a record is as good as its worst
         # channel. Flags are OR-ed, never cleared — transport can add MISSING or
-        # OUT_OF_ORDER later, but it may not decide a sensor flag was mistaken.
+        # OUT_OF_ORDER, but it may not decide a sensor flag was mistaken.
         quality = observation.irradiance_quality | observation.power_quality
+
+        # Scheduled communication faults. Nothing about the *value* is touched:
+        # the instrument read correctly and the reading was lost in transit.
+        # Only whether it arrived changes.
+        comm_faults = self.schedule.for_layer("transport")
+        delivered = delivery_mask(comm_faults, observation.event_time)
+
+        active_comm_fault = np.full(n, "", dtype=object)
+        for fault in comm_faults:
+            window = fault.mask(observation.event_time)
+            active_comm_fault[window] = fault.fault_type.value
+
+        # A record that never arrived is MISSING, and the flag is set on the
+        # collector's view of it rather than on the reading, which was fine.
+        quality = self.mark_missing(quality, ~delivered)
 
         return Delivery(
             site_id=observation.site_id,
             event_time=observation.event_time,
-            # Nothing travelled, so arrival lag is genuinely zero.
+            # Nothing that arrived travelled through a delay, so arrival lag is
+            # genuinely zero. Phase 5 makes this a real quantity.
             ingest_time=observation.event_time,
             sequence=np.arange(n, dtype=np.int64),
-            delivered=np.ones(n, dtype=bool),
+            delivered=delivered,
             quality=quality,
+            active_comm_fault=active_comm_fault,
         )
 
     @staticmethod
     def mark_missing(quality: np.ndarray, missing: np.ndarray) -> np.ndarray:
         """OR the MISSING flag into a quality column.
 
-        Provided now so phase 5 sets flags through the same path this layer
-        already uses, rather than inventing a second convention.
+        Used by scheduled communication faults, and by phase 5's stochastic
+        loss, so both set flags through one path rather than inventing a second
+        convention.
         """
         out = quality.copy()
         out[missing] |= int(QualityFlag.MISSING)

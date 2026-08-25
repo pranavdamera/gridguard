@@ -135,6 +135,11 @@ class SimulationConfig:
     sensors: SensorConfig = field(default_factory=SensorConfig)
     transport: TransportConfig = field(default_factory=TransportConfig)
 
+    #: Inject the full fault taxonomy, attached to each site's real assets.
+    #: Off by default: a baseline run is a healthy fleet, and faults are an
+    #: explicit choice rather than something a caller gets by accident.
+    inject_faults: bool = False
+
     def __post_init__(self) -> None:
         if not self.site_ids:
             raise ValueError("SimulationConfig needs at least one site")

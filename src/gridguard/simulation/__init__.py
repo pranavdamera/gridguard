@@ -53,6 +53,12 @@ from gridguard.simulation.equipment import (
     EquipmentState,
     EquipmentTruth,
 )
+from gridguard.simulation.faults import (
+    FAULT_LAYER,
+    FaultSchedule,
+    FaultSpec,
+    build_layered_scenario,
+)
 from gridguard.simulation.runner import (
     FleetSimulator,
     SimulationResult,
@@ -75,6 +81,9 @@ __all__ = [
     "EquipmentLayer",
     "EquipmentState",
     "EquipmentTruth",
+    "FAULT_LAYER",
+    "FaultSchedule",
+    "FaultSpec",
     "FleetSimulator",
     "LogicalClock",
     "Observation",
@@ -86,6 +95,7 @@ __all__ = [
     "Tick",
     "TransportConfig",
     "TransportLayer",
+    "build_layered_scenario",
     "simulate",
     "stream_for",
 ]
