@@ -90,10 +90,17 @@ message TelemetryRecord {
   // Absent on the wire from the edge; populated on arrival.
   google.protobuf.Timestamp ingest_time = 7;
 
-  // Per-asset monotonic counter. Together with `asset_id` this is the
-  // deduplication key: an edge agent replaying a buffer after reconnecting
-  // resends records the collector may already hold, and an idempotent upsert on
-  // (asset_id, sequence) makes that replay free of side effects.
+  // Monotonic counter per (asset_id, channel). Together with those two fields
+  // this is the deduplication key: an edge agent replaying a buffer after
+  // reconnecting resends records the collector may already hold, and an
+  // idempotent upsert on (asset_id, channel, sequence) makes that replay free
+  // of side effects.
+  //
+  // The channel is part of the key, not incidental to it. One asset emits
+  // several channels per interval, so an asset-scoped key collides between
+  // them — a fault found by an end-to-end test that watched three of every four
+  // records get silently rejected as duplicates. A sequence numbers a stream,
+  // and the stream is the channel, which is also what fails independently.
   uint64 sequence = 8;
 
   // Bitfield of QualityFlag values. Set by whoever first observes the problem

@@ -85,6 +85,13 @@ src/gridguard/
 │   ├── codec.py           Domain record ↔ wire record
 │   └── bridge.py          Simulator frames ↔ narrow wire records
 │
+├── edge/                  ── Edge agent ───────────────────────────────
+│   ├── buffer.py          Durable SQLite outbox; sequence assignment
+│   ├── transport.py       Transport interface + controllable fake
+│   ├── quality.py         Local checks — range, frozen channel
+│   ├── screening.py       Local clear-sky screen (works disconnected)
+│   └── agent.py           ingest → check → buffer → publish → acknowledge
+│
 └── analysis/diagnostics.py  Offline research diagnostics
 ```
 
