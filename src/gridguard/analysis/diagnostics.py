@@ -29,7 +29,7 @@ Genuinely absent from the rest of the project, and therefore new code:
     a cosine-of-zenith approximation written out inline. That duplicated, less
     accurate than, and silently divergent from the pvlib Ineichen model the rest
     of the project already uses, so it is rebuilt on
-    :func:`gridguard.data.synthetic._clear_sky_poa`'s approach instead. The
+    :func:`gridguard.data.synthetic.clear_sky_poa`'s approach instead. The
     numbers will not match the dashboard's, and should not: these are better.
 
 The projection is a **physical upper bound under clear skies**, not a
@@ -214,11 +214,11 @@ def clear_sky_projection(
         ``wind_speed_ms``, ``projected_kw``. Carries an ``attrs["assumptions"]``
         dict describing what was assumed.
     """
-    from gridguard.data.synthetic import _clear_sky_poa
+    from gridguard.data.synthetic import clear_sky_poa
     from gridguard.features.engineer import get_X_y
 
     index = pd.date_range(start, periods=periods, freq=freq)
-    _, poa = _clear_sky_poa(index, site)
+    _, poa = clear_sky_poa(index, site)
 
     day_of_year = index.day_of_year.to_numpy()
     hour = index.hour.to_numpy() + index.minute.to_numpy() / 60.0

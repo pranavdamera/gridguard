@@ -183,14 +183,14 @@ def test_clear_sky_projection_uses_pvlib_not_hand_rolled_geometry():
     approximated this; the shared pvlib model is the single source of truth for
     it now, and the two must not silently diverge again.
     """
-    from gridguard.data.synthetic import _clear_sky_poa
+    from gridguard.data.synthetic import clear_sky_poa
 
     site = get_site("nist_roof")
     summer = pd.date_range("2016-06-21 12:00", periods=1, freq="15min")
     winter = pd.date_range("2016-12-21 12:00", periods=1, freq="15min")
 
-    _, summer_poa = _clear_sky_poa(summer, site)
-    _, winter_poa = _clear_sky_poa(winter, site)
+    _, summer_poa = clear_sky_poa(summer, site)
+    _, winter_poa = clear_sky_poa(winter, site)
 
     assert summer_poa[0] > 0
     assert winter_poa[0] >= 0

@@ -38,6 +38,53 @@ or below this line whenever there is cloud. Every projection frame carries an
 `attrs["assumptions"]` dict saying exactly this, and the CSV is written beside
 the figure so the assumption travels with the number.
 
+## `run_simulation.py`
+
+Runs the layered site simulator and writes three views of the same run, kept
+separate on purpose:
+
+| Output | What it is |
+| --- | --- |
+| `truth.parquet` | What physically happened, per asset: real weather, real generation, real equipment state. The answer key. Never fed to a model. |
+| `observed.parquet` | What the instruments reported. What a model would see if the network were perfect. |
+| `canonical.parquet` | What reached the collector, in the shipped schema. What a model actually sees. |
+| `run.json` | Config, seed, fingerprint, throughput, and a digest of each frame. |
+
+```bash
+python experiments/run_simulation.py --days 30                    # 7 sites, ~1s
+python experiments/run_simulation.py --site nist_roof --seed 3
+python experiments/run_simulation.py --days 1 --speedup 40000 --replay
+```
+
+### Why three frames and not one
+
+Three different things can make a value wrong or absent at the collector: the
+plant produced nothing, the instrument failed, or the reading never arrived.
+An architecture that merges them cannot tell them apart, and telling them apart
+is the research question. So the simulator keeps a layer boundary at each
+transition and retains the output of each.
+
+`result.observation_error()` is the direct consequence: the measured gap between
+what happened and what was reported. A phase 8 attribution experiment scores a
+sensor fault against that baseline rather than estimating it.
+
+### Speed and reproducibility
+
+A run is a pure function of `(SimulationConfig, seed)` — no wall-clock, no
+environment, no process-dependent hashing. Every layer of every asset draws from
+its own named random stream, so enabling a fault in one layer provably cannot
+perturb another. Without that, injecting a sensor fault would come bundled with
+different weather and no detector response could be attributed to either; the
+test suite asserts it directly.
+
+Computation is vectorised — 7 sites over 30 simulated days takes about a second,
+roughly two million times real time. Pacing is therefore applied to `--replay`,
+*after* the values exist, which makes "pacing cannot change results" true by
+construction rather than by discipline. `run.json` records the frame digests so
+a paced demo and an unpaced experiment can be checked against each other by eye.
+
+---
+
 ## Relationship to the retired Streamlit dashboard
 
 GridGuard used to carry a second UI in `dashboard/app.py`. It was retired
