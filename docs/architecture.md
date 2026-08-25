@@ -37,7 +37,6 @@ src/gridguard/
 │   ├── schema.py          Canonical schema, resampling, missing values
 │   ├── provenance.py      DatasetProvenance — attached to every dataset
 │   ├── oedi.py            NREL PVDAQ via the OEDI data lake
-│   ├── nsrdb.py           Optional weather API (unused by the shipped path)
 │   ├── synthetic.py       DMV fleet simulator
 │   ├── faults.py          Fault taxonomy and injection
 │   └── sources.py         DataSource ABC + dispatch by data_mode
@@ -47,14 +46,13 @@ src/gridguard/
 ├── models/                ── Modelling ────────────────────────────────
 │   ├── baseline.py        Persistence, Ridge, RandomForest, XGBoost
 │   ├── physics.py         pvlib PVWatts chain + hybrid residual model
-│   ├── train.py           Legacy training entry point
 │   └── evaluate.py        Metrics, stratified reporting
 │
 ├── anomaly/               ── Detection ────────────────────────────────
 │   ├── conformal.py       Split conformal, Mondrian calibration
 │   ├── detect.py          Detection (conformal default, sigma benchmark)
 │   ├── events.py          Grouping, severity
-│   └── evaluate.py        Detection metrics against injected faults
+│   └── evaluate.py        Metrics, stratified reporting
 │
 ├── spatial/               ── Geospatial ───────────────────────────────
 │   ├── geo.py             Haversine, neighbour graphs, bounds

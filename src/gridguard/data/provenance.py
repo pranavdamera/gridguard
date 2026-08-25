@@ -50,6 +50,11 @@ class DatasetProvenance:
     start: str = ""  # ISO 8601, local standard time
     end: str = ""
     timezone_note: str = ""
+    #: Fixed UTC offset of ``start``/``end`` and of the frame's ``timestamp``
+    #: column, in hours. ``timezone_note`` explains it for a reader; this is
+    #: what code uses. The schema shim cannot derive UTC event times without
+    #: it, so it is recorded rather than re-inferred at every call site.
+    utc_offset_hours: int | None = None
     row_count: int | None = None
 
     # --- weather ------------------------------------------------------------

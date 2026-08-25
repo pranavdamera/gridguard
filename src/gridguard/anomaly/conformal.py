@@ -38,6 +38,25 @@ reports a bound:
    range of healthy behaviour. Attribution to a cause is a separate question —
    see :mod:`gridguard.spatial.context`.
 
+Open question: validity under degraded telemetry
+------------------------------------------------
+Limitation 2 above is about to get sharper. As GridGuard moves to a distributed
+edge architecture, calibration and scoring residuals stop being exchangeable in
+a *second*, independent way: samples go missing, arrive late, or arrive
+corrupted, and which samples that happens to is not random with respect to the
+conditions the site is in — a communications link under load, or a sensor
+failing in heat, correlates with exactly the intervals a detector cares about.
+
+Nothing in this module compensates for that, deliberately. Coverage under each
+degradation regime is to be **measured and reported as a curve**, not assumed to
+carry over and not quietly patched around. Widening the interval until the
+guarantee appears to hold again would destroy the finding.
+
+The experiment is specified in ``experiments/README.md``. Anyone changing
+calibration behaviour here should read it first: degradation of interval
+validity under missing, delayed and corrupted telemetry is a result this project
+intends to produce, not a defect to be engineered away.
+
 References
 ----------
 Angelopoulos & Bates (2023), "Conformal Prediction: A Gentle Introduction",

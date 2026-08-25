@@ -235,26 +235,6 @@ def test_provenance_marks_synthetic_and_lists_limitations():
     assert any("not measured" in note.lower() for note in provenance.known_limitations)
 
 
-def test_load_raw_data_shim_still_works(tmp_path):
-    """The deprecated entry point keeps older callers working."""
-    from gridguard.ingestion.download import load_raw_data
-
-    frame = load_raw_data(output_dir=tmp_path, site_id="gmu_fairfax", inject_scenario=False)
-    assert "site_id" in frame.columns
-    assert (frame["site_id"] == "gmu_fairfax").all()
-    assert (tmp_path / "telemetry_gmu_fairfax.parquet").exists()
-
-
-def test_load_raw_data_shim_caches_per_site(tmp_path):
-    from gridguard.ingestion.download import load_raw_data
-
-    load_raw_data(output_dir=tmp_path, site_id="gmu_fairfax", inject_scenario=False)
-    load_raw_data(output_dir=tmp_path, site_id="nova_alexandria", inject_scenario=False)
-
-    assert (tmp_path / "telemetry_gmu_fairfax.parquet").exists()
-    assert (tmp_path / "telemetry_nova_alexandria.parquet").exists()
-
-
 def test_site_seed_is_stable_across_processes():
     """Determinism must survive Python's per-process string hash salt.
 

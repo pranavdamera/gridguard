@@ -1,6 +1,6 @@
-.PHONY: install install-dashboard lint format test \
+.PHONY: install install-experiments lint format test \
         build-artifacts build-real build-synthetic data-real \
-        api web dashboard demo \
+        api web diagnostics demo \
         docker-build docker-up docker-down clean
 
 # ---------------------------------------------------------------------------
@@ -11,8 +11,8 @@ install:
 	pip install -e ".[dev]"
 	cd web && npm ci
 
-install-dashboard:
-	pip install -e ".[dashboard]"
+install-experiments:
+	pip install -e ".[experiments]"
 
 # ---------------------------------------------------------------------------
 # Quality gates — the same checks CI runs
@@ -64,9 +64,10 @@ api:
 web:
 	cd web && npm run dev
 
-# Streamlit is the internal research/diagnostics surface, not the product.
-dashboard:
-	streamlit run dashboard/app.py --server.port 8501
+# Offline research diagnostics: writes report figures and the CSVs behind them
+# to artifacts/reports/diagnostics/. Needs `make install-experiments` first.
+diagnostics:
+	python experiments/run_diagnostics.py
 
 demo:
 	@echo "GridGuard — run these in separate terminals:"
@@ -75,12 +76,15 @@ demo:
 	@echo "  make api               -> http://localhost:8000/docs"
 	@echo "  make web               -> http://localhost:3000"
 	@echo ""
-	@echo "  Optional research dashboard:"
-	@echo "  make dashboard         -> http://localhost:8501"
+	@echo "  Optional research diagnostics:"
+	@echo "  make diagnostics       -> artifacts/reports/diagnostics/"
 
 # ---------------------------------------------------------------------------
 # Docker
 # ---------------------------------------------------------------------------
+
+# `docker compose up` is the whole demo: it builds artifacts once, then starts
+# the API and the web app in dependency order.
 
 docker-build:
 	docker compose build
@@ -89,7 +93,9 @@ docker-up:
 	docker compose up -d
 
 docker-down:
-	docker compose down
+	docker compose down -v
+
+
 
 # ---------------------------------------------------------------------------
 # Housekeeping

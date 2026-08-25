@@ -1,35 +1,72 @@
+# One-command GridGuard demo.
+#
+#   docker compose up
+#
+# starts three things in order: a one-shot build that produces the model,
+# calibration and manifest artifacts; the API that serves them; and the web
+# application. The API never trains — `artifacts` is what trains, once, and the
+# API waits for it to finish successfully before starting.
+
+name: gridguard
+
 services:
+  # ---------------------------------------------------------------------
+  # One-shot artifact build. Runs to completion and exits.
+  # ---------------------------------------------------------------------
+  artifacts:
+    build:
+      context: .
+      target: api
+    command: ["python", "scripts/build_artifacts.py"]
+    volumes:
+      - ./artifacts:/app/artifacts
+      - ./data:/app/data
+    environment:
+      DATA_MODE: ${DATA_MODE:-synthetic}
+      MODEL_DIR: artifacts/models
+      DATA_PROCESSED_DIR: data/processed
+      DATA_CURATED_DIR: data/curated
+    restart: "no"
+
+  # ---------------------------------------------------------------------
+  # Read-only backend.
+  # ---------------------------------------------------------------------
   api:
-    build: .
+    build:
+      context: .
+      target: api
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
       - ./artifacts:/app/artifacts
-    environment:
-      - DATA_SOURCE=${DATA_SOURCE:-synthetic}
-      - NREL_API_KEY=${NREL_API_KEY:-DEMO_KEY}
-      - MODEL_DIR=artifacts/models
-      - DATA_PROCESSED_DIR=data/processed
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  dashboard:
-    build: .
-    command: streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0
-    ports:
-      - "8501:8501"
-    volumes:
       - ./data:/app/data
-      - ./artifacts:/app/artifacts
     environment:
-      - DATA_SOURCE=${DATA_SOURCE:-synthetic}
-      - MODEL_DIR=artifacts/models
-      - DATA_PROCESSED_DIR=data/processed
+      DATA_MODE: ${DATA_MODE:-synthetic}
+      MODEL_DIR: artifacts/models
+      DATA_PROCESSED_DIR: data/processed
+      DATA_CURATED_DIR: data/curated
+      # Both the browser origin and the in-network origin the web container
+      # server-renders from.
+      CORS_ALLOWED_ORIGINS: http://localhost:3000,http://web:3000
     depends_on:
-      - api
+      artifacts:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  # Flagship frontend.
+  # ---------------------------------------------------------------------
+  web:
+    build:
+      context: ./web
+      args:
+        # Inlined at build time by Next; every page is a server component, so
+        # this is resolved on the compose network, never in the viewer's
+        # browser.
+        NEXT_PUBLIC_API_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
     restart: unless-stopped

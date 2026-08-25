@@ -1,31 +1,57 @@
-FROM python:3.11-slim
+# GridGuard backend image.
+#
+# The dependency list is derived from pyproject.toml rather than restated here.
+# The previous version of this file kept a hand-maintained copy of the list, and
+# it had drifted: it omitted pvlib and scipy while installing lightgbm (imported
+# nowhere) and streamlit. Since `gridguard.api.main` imports `data.synthetic`,
+# which imports pvlib at module level, the resulting image could not start the
+# API at all — it died on import. Reading the real dependency set removes the
+# class of bug rather than the instance.
+
+# ---------------------------------------------------------------------------
+# base — runtime dependencies and the installed package
+# ---------------------------------------------------------------------------
+FROM python:3.11-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-# System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+        build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install runtime dependencies first (cached unless pyproject.toml changes).
-# Separating this from the package install keeps the layer cache stable across
-# source-only changes.
+# Dependency layer, cached until pyproject.toml itself changes. tomllib is in
+# the 3.11 standard library, so this needs nothing installed to run.
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir \
-    "pandas>=2.1" "numpy>=1.26" "scikit-learn>=1.4" "xgboost>=2.0" "lightgbm>=4.0" \
-    "shap>=0.44" "fastapi>=0.111" "uvicorn[standard]>=0.29" "streamlit>=1.35" \
-    "plotly>=5.20" "httpx>=0.27" "pydantic>=2.7" "pydantic-settings>=2.3" \
-    "python-dotenv>=1.0" "requests>=2.31" "joblib>=1.4" "pyarrow>=16"
+RUN python -c "import tomllib,pathlib;p=pathlib.Path('pyproject.toml');d=tomllib.loads(p.read_text())['project']['dependencies'];pathlib.Path('/tmp/requirements.txt').write_text(chr(10).join(d))" \
+ && pip install -r /tmp/requirements.txt
 
-# Copy source and register the package (--no-deps avoids reinstalling above)
+# Source, entry points, the site registry, and the curated measured telemetry.
+# Shipping data/curated means the image runs the real-data pipeline with no
+# download and no credentials, exactly as a fresh clone does.
 COPY src/ ./src/
 COPY scripts/ ./scripts/
-COPY dashboard/ ./dashboard/
 COPY config/ ./config/
-RUN pip install --no-cache-dir --no-deps -e .
+COPY data/curated/ ./data/curated/
 
-# Artifacts and data are mounted at runtime via docker-compose volumes
+# --no-deps: everything is already installed above; this only registers the
+# package. It is also why the drift above was fatal rather than self-healing.
+RUN pip install --no-deps -e .
+
+# ---------------------------------------------------------------------------
+# api — the deployed backend. Never trains; loads prebuilt artifacts.
+# ---------------------------------------------------------------------------
+FROM base AS api
 
 EXPOSE 8000
+
+# Probed with Python rather than curl: the slim image has no curl, so the
+# previous HEALTHCHECK could only ever report unhealthy.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD python -c "import sys,urllib.request;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=5).status==200 else 1)"
 
 CMD ["uvicorn", "gridguard.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -112,14 +112,14 @@ def generate_site_telemetry(
     # A stable digest, not the builtin hash(): Python salts string hashing per
     # process unless PYTHONHASHSEED is pinned, so hash() here would silently
     # produce different "deterministic" data on every run.
-    site_seed = seed + _stable_site_offset(site.site_id)
+    site_seed = seed + stable_site_offset(site.site_id)
     rng = np.random.default_rng(site_seed)
 
     index = pd.date_range(start, end, freq=freq)
-    ghi, poa = _clear_sky_poa(index, site)
+    ghi, poa = clear_sky_poa(index, site)
 
     # --- cloud attenuation: AR(1) so cloudiness persists -------------------
-    cloud = _autocorrelated_cloud_factor(len(index), rng)
+    cloud = autocorrelated_cloud_factor(len(index), rng)
     irradiance = np.clip(poa * cloud, 0, 1400)
     irradiance[ghi <= 1.0] = 0.0  # no plane-of-array signal without sun
 
@@ -146,7 +146,7 @@ def generate_site_telemetry(
     # arise. Real arrays deviate from their weather-implied output in ways that
     # persist for days, which is exactly what makes a lag-aware model dangerous
     # as an anomaly baseline.
-    performance = _performance_drift(len(index), rng)
+    performance = performance_drift(len(index), rng)
 
     ac_power = site.capacity_kw * (irradiance / 1000.0) * efficiency * _SYSTEM_DERATE * performance
     # Measurement noise on the power channel itself, proportional to output.
@@ -200,6 +200,7 @@ def generate_site_telemetry(
         timezone_note=(
             f"Local standard time, fixed UTC{UTC_OFFSET_HOURS:+d}, no daylight-saving shift."
         ),
+        utc_offset_hours=UTC_OFFSET_HOURS,
         row_count=len(frame),
         weather_source="Simulated (pvlib Ineichen clear-sky with autoregressive cloud attenuation)",
         irradiance_kind="plane-of-array (modelled)",
@@ -240,7 +241,7 @@ def _demo_event() -> FaultEvent:
     )
 
 
-def _clear_sky_poa(index: pd.DatetimeIndex, site: Site) -> tuple[np.ndarray, np.ndarray]:
+def clear_sky_poa(index: pd.DatetimeIndex, site: Site) -> tuple[np.ndarray, np.ndarray]:
     """Clear-sky GHI and plane-of-array irradiance for a site's real geometry."""
     import pvlib
 
@@ -268,7 +269,7 @@ def _clear_sky_poa(index: pd.DatetimeIndex, site: Site) -> tuple[np.ndarray, np.
     return clearsky["ghi"].to_numpy(), poa["poa_global"].fillna(0.0).to_numpy()
 
 
-def _autocorrelated_cloud_factor(n: int, rng: np.random.Generator) -> np.ndarray:
+def autocorrelated_cloud_factor(n: int, rng: np.random.Generator) -> np.ndarray:
     """AR(1) cloud transmittance in [0, 1].
 
     Real cloudiness is strongly autocorrelated: a cloudy interval is very likely
@@ -292,13 +293,13 @@ def _autocorrelated_cloud_factor(n: int, rng: np.random.Generator) -> np.ndarray
     return np.clip(0.15 + 0.85 * uniform**0.55, 0.05, 1.0)
 
 
-def _stable_site_offset(site_id: str) -> int:
+def stable_site_offset(site_id: str) -> int:
     """A per-site seed offset that is identical across processes and platforms."""
     digest = hashlib.blake2b(site_id.encode("utf-8"), digest_size=4).digest()
     return int.from_bytes(digest, "big") % 10_000
 
 
-def _performance_drift(n: int, rng: np.random.Generator) -> np.ndarray:
+def performance_drift(n: int, rng: np.random.Generator) -> np.ndarray:
     """A multiplicative performance factor that drifts over days, not intervals.
 
     Modelled as a strongly-persistent AR(1) around 1.0. The persistence is what

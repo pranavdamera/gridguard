@@ -27,6 +27,31 @@ Optional columns
                        truth is known by construction. Measured telemetry has
                        no trustworthy fault labels and therefore never carries
                        this column — see ``docs/methodology.md``.
+
+Distributed columns
+-------------------
+Added by :func:`upgrade_to_domain_schema`, and optional throughout: every frame
+committed before they existed still loads, and every model trained before they
+existed still scores.
+
+``event_time``   datetime64[ns, UTC], **timezone-aware**. The authoritative
+                 instant a measurement was taken. Derived from ``timestamp``
+                 and the fixed offset in the dataset's provenance.
+``ingest_time``  datetime64[ns, UTC]. When the measurement reached the
+                 collector. Equal to ``event_time`` for data that never
+                 travelled — a batch file has no arrival lag.
+``asset_id``     str, key into the asset registry.
+``quality``      int, a :class:`~gridguard.domain.telemetry.QualityFlag` set.
+``sequence``     int, per-asset monotonic counter, for de-duplicating replays.
+
+Why ``timestamp`` stays
+-----------------------
+``event_time`` is authoritative, but ``timestamp`` is not removed. Solar
+position is computed from local standard time throughout the project — that is
+what keeps the diurnal cycle continuous across daylight-saving boundaries — and
+every committed parquet, trained model and artifact manifest is indexed by it.
+The two are exact inverses of each other given the site's fixed offset, which is
+asserted in tests rather than assumed.
 """
 
 from __future__ import annotations
@@ -54,6 +79,16 @@ CANONICAL_COLUMNS: list[str] = [
 
 #: Columns that may additionally be present.
 OPTIONAL_COLUMNS: list[str] = ["is_injected_fault"]
+
+#: Columns the domain model adds. Optional: absence means the frame predates
+#: them, not that it is invalid.
+DOMAIN_COLUMNS: list[str] = [
+    "event_time",
+    "ingest_time",
+    "asset_id",
+    "quality",
+    "sequence",
+]
 
 #: Numeric columns that get averaged when resampling to a coarser interval.
 _MEAN_COLUMNS: list[str] = [
@@ -226,3 +261,85 @@ def clip_physical_ranges(df: pd.DataFrame, *, capacity_kw: float | None = None) 
             )
             out.loc[implausible, "ac_power_kw"] = np.nan
     return out
+
+
+# ---------------------------------------------------------------------------
+# Domain schema upgrade
+# ---------------------------------------------------------------------------
+
+
+def upgrade_to_domain_schema(
+    df: pd.DataFrame,
+    *,
+    utc_offset_hours: int,
+    asset_id: str | None = None,
+    ingest_time: pd.Series | None = None,
+) -> pd.DataFrame:
+    """Add the distributed-system columns to a legacy canonical frame.
+
+    Every committed parquet file in this repository predates the domain model.
+    Rather than rewriting them — which would invalidate the artifact manifests
+    that record exactly what was built from what — the columns are synthesised
+    on load from information the frame already carries.
+
+    Defaults, and why each is the honest one:
+
+    ``event_time``   ``timestamp`` shifted by the site's fixed UTC offset. This
+                     is a lossless representation change, not an assumption.
+    ``ingest_time``  Equal to ``event_time``. A batch file did not travel, so
+                     its arrival lag is genuinely zero — reporting anything else
+                     would invent a network that was not there.
+    ``asset_id``     The site's primary array. Legacy rows are whole-site
+                     measurements with no asset dimension; attributing them to
+                     the largest array is the least misleading available choice
+                     and is recorded as such.
+    ``quality``      ``QualityFlag.OK``. These rows already passed
+                     :func:`validate_canonical` and had unusable rows dropped.
+    ``sequence``     Row order within the frame. Monotonic per asset, which is
+                     all a de-duplicator needs of it.
+
+    Idempotent: columns already present are left alone, so calling this twice
+    does not overwrite real ingest times with synthesised ones.
+    """
+    from gridguard.domain.telemetry import QualityFlag, local_to_event_time
+
+    out = df.copy()
+
+    if "event_time" not in out.columns:
+        out["event_time"] = local_to_event_time(out["timestamp"], utc_offset_hours)
+
+    if "ingest_time" not in out.columns:
+        out["ingest_time"] = (
+            pd.to_datetime(ingest_time, utc=True) if ingest_time is not None else out["event_time"]
+        )
+
+    if "asset_id" not in out.columns:
+        if asset_id is None:
+            from gridguard.sites.registry import primary_asset_id
+
+            site_ids = out["site_id"].unique()
+            if len(site_ids) != 1:
+                raise SchemaError(
+                    "upgrade_to_domain_schema needs an explicit asset_id for a frame "
+                    f"spanning {len(site_ids)} sites."
+                )
+            asset_id = primary_asset_id(str(site_ids[0]))
+        out["asset_id"] = asset_id
+
+    if "quality" not in out.columns:
+        out["quality"] = int(QualityFlag.OK)
+
+    if "sequence" not in out.columns:
+        out["sequence"] = range(len(out))
+
+    ordered = (
+        CANONICAL_COLUMNS
+        + [c for c in DOMAIN_COLUMNS if c in out.columns]
+        + [c for c in out.columns if c not in CANONICAL_COLUMNS + DOMAIN_COLUMNS]
+    )
+    return out[ordered]
+
+
+def has_domain_columns(df: pd.DataFrame) -> bool:
+    """Whether a frame already carries the distributed-system columns."""
+    return all(c in df.columns for c in DOMAIN_COLUMNS)

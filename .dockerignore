@@ -1,0 +1,25 @@
+.git
+.github
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.coverage
+coverage.xml
+htmlcov
+
+# Build output — rebuilt inside the image, and mounted at runtime by compose.
+artifacts/
+data/processed/
+data/raw/
+data/interim/
+
+# The frontend has its own build context and Dockerfile.
+web/
+
+docs/
+tests/
+dashboard/__pycache__
+.env
+.venv
+venv

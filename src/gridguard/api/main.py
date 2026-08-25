@@ -224,7 +224,7 @@ def _default_fleet_window(days: int = 1) -> tuple[str | None, str | None]:
     both statements about a *moment*, not a season.
 
     So the default anchors on the day of the fleet's most severe event — the
-    thing an operator would want the dashboard to open on — falling back to the
+    thing an operator would want the fleet view to open on — falling back to the
     most recent day of data when there are no events. The resolved window is
     always returned in the response so the UI can state what it is showing.
     """

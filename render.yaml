@@ -58,10 +58,5 @@ services:
       - key: CONFORMAL_ALPHA
         value: "0.05"
 
-      # NSRDB is NOT required. The shipped real-data pipeline uses weather
-      # measured at the array. Set these only if you extend the fleet to a site
-      # without on-site instruments.
-      # - key: NREL_API_KEY
-      #   sync: false
-      # - key: NREL_API_EMAIL
-      #   sync: false
+      # No credentials are required. The real-data pipeline reads the OEDI data
+      # lake anonymously and uses weather measured at the array.
