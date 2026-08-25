@@ -55,20 +55,3 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD python -c "import sys,urllib.request;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=5).status==200 else 1)"
 
 CMD ["uvicorn", "gridguard.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
-
-# ---------------------------------------------------------------------------
-# dashboard — internal research surface, not the product.
-#
-# A separate stage so streamlit and plotly stay out of the API image. Started
-# only via the `research` compose profile.
-# ---------------------------------------------------------------------------
-FROM base AS dashboard
-
-RUN python -c "import tomllib,pathlib;p=pathlib.Path('pyproject.toml');d=tomllib.loads(p.read_text())['project']['optional-dependencies']['dashboard'];pathlib.Path('/tmp/dashboard.txt').write_text(chr(10).join(d))" \
- && pip install -r /tmp/dashboard.txt
-
-COPY dashboard/ ./dashboard/
-
-EXPOSE 8501
-
-CMD ["streamlit", "run", "dashboard/app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]

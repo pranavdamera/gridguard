@@ -1,7 +1,7 @@
-.PHONY: install install-dashboard lint format test \
+.PHONY: install install-experiments lint format test \
         build-artifacts build-real build-synthetic data-real \
-        api web dashboard demo \
-        docker-build docker-up docker-down docker-research clean
+        api web diagnostics demo \
+        docker-build docker-up docker-down clean
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -11,8 +11,8 @@ install:
 	pip install -e ".[dev]"
 	cd web && npm ci
 
-install-dashboard:
-	pip install -e ".[dashboard]"
+install-experiments:
+	pip install -e ".[experiments]"
 
 # ---------------------------------------------------------------------------
 # Quality gates — the same checks CI runs
@@ -64,9 +64,10 @@ api:
 web:
 	cd web && npm run dev
 
-# Streamlit is the internal research/diagnostics surface, not the product.
-dashboard:
-	streamlit run dashboard/app.py --server.port 8501
+# Offline research diagnostics: writes report figures and the CSVs behind them
+# to artifacts/reports/diagnostics/. Needs `make install-experiments` first.
+diagnostics:
+	python experiments/run_diagnostics.py
 
 demo:
 	@echo "GridGuard — run these in separate terminals:"
@@ -75,8 +76,8 @@ demo:
 	@echo "  make api               -> http://localhost:8000/docs"
 	@echo "  make web               -> http://localhost:3000"
 	@echo ""
-	@echo "  Optional research dashboard:"
-	@echo "  make dashboard         -> http://localhost:8501"
+	@echo "  Optional research diagnostics:"
+	@echo "  make diagnostics       -> artifacts/reports/diagnostics/"
 
 # ---------------------------------------------------------------------------
 # Docker
@@ -94,9 +95,7 @@ docker-up:
 docker-down:
 	docker compose down -v
 
-# Adds the Streamlit research surface on :8501. Not part of the default path.
-docker-research:
-	docker compose --profile research up -d
+
 
 # ---------------------------------------------------------------------------
 # Housekeeping

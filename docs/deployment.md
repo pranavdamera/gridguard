@@ -66,10 +66,10 @@ make api                     # terminal 1 -> http://localhost:8000/docs
 make web                     # terminal 2 -> http://localhost:3000
 ```
 
-Optional research dashboard (`pip install -e ".[dashboard]"` first):
+Offline research diagnostics (`pip install -e ".[experiments]"` first):
 
 ```bash
-make dashboard               # -> http://localhost:8501
+make diagnostics             # -> artifacts/reports/diagnostics/
 ```
 
 ---
@@ -223,13 +223,6 @@ That is the whole thing. Three services start in order:
 | `artifacts` | One-shot. Trains, calibrates, evaluates, writes the manifest, exits. |
 | `api` | Waits for `artifacts` to exit successfully, then serves them on :8000. |
 | `web` | Waits for `api` to report healthy, then serves the frontend on :3000. |
-
-The Streamlit research surface is behind a profile and is not part of the
-default path:
-
-```bash
-docker compose --profile research up      # adds :8501
-```
 
 ### How dependencies are installed
 

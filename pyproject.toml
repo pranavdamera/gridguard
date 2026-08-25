@@ -26,10 +26,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Streamlit research dashboard. Not required by the API or the pipeline.
-dashboard = [
-    "streamlit>=1.35,<2",
-    "plotly>=5.20,<7",
+# Offline research diagnostics (experiments/). Not required by the API, the
+# pipeline, or the web application — only to render report figures.
+experiments = [
+    "matplotlib>=3.8,<4",
 ]
 dev = [
     "pytest>=8,<10",

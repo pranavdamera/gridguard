@@ -52,7 +52,7 @@ make test              # all tests should pass before opening a PR
 - Real dataset adapters (Open Power System Data, Ausgrid, PVOutput)
 - Better anomaly detection (conformal prediction intervals, CUSUM)
 - Multi-site fleet-level analysis
-- Dashboard improvements
+- Research diagnostics (`experiments/`)
 - Documentation fixes
 
 ## What's out of scope

@@ -309,13 +309,13 @@ make web                # terminal 2 → http://localhost:3000
 telemetry (~3 MB) is committed to `data/curated/`, and the simulated fleet is
 regenerated deterministically from a fixed seed.
 
-Optional research dashboard (`pip install -e ".[dashboard]"` first):
+Offline research diagnostics (`pip install -e ".[experiments]"` first):
 
 ```bash
-make dashboard          # → http://localhost:8501
+make diagnostics        # → artifacts/reports/diagnostics/
 ```
 
-Streamlit is an internal model-diagnostics surface. **The Next.js app is the
+These write report figures and the CSVs behind them. **The Next.js app is the
 product.**
 
 ---
@@ -440,7 +440,7 @@ Stated plainly, because a demo that oversells is worse than one that doesn't.
 | Explainability | shap |
 | API | fastapi, uvicorn, pydantic |
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind, **MapLibre GL**, Recharts |
-| Research UI | streamlit, plotly (optional extra) |
+| Research diagnostics | matplotlib (optional extra) |
 | Dev | pytest, ruff, black |
 
 ---

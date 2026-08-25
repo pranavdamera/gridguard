@@ -6,11 +6,6 @@
 # calibration and manifest artifacts; the API that serves them; and the web
 # application. The API never trains — `artifacts` is what trains, once, and the
 # API waits for it to finish successfully before starting.
-#
-# The optional Streamlit research surface is behind a profile, so it stays out
-# of the default path and out of the API image:
-#
-#   docker compose --profile research up
 
 name: gridguard
 
@@ -74,26 +69,4 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    restart: unless-stopped
-
-  # ---------------------------------------------------------------------
-  # Internal research/diagnostics surface. Not the product.
-  # ---------------------------------------------------------------------
-  dashboard:
-    profiles: ["research"]
-    build:
-      context: .
-      target: dashboard
-    ports:
-      - "8501:8501"
-    volumes:
-      - ./artifacts:/app/artifacts
-      - ./data:/app/data
-    environment:
-      DATA_MODE: ${DATA_MODE:-synthetic}
-      MODEL_DIR: artifacts/models
-      DATA_PROCESSED_DIR: data/processed
-    depends_on:
-      artifacts:
-        condition: service_completed_successfully
     restart: unless-stopped
