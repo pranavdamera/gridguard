@@ -33,7 +33,11 @@ export default async function EventDetailPage(props: {
   params: Promise<{ eventId: string }>;
 }) {
   const { eventId } = await props.params;
-  const { data, error } = await tryFetch(() => api.event(eventId));
+  // Next hands back the raw URL segment, so a global event id ("site_id:number")
+  // arrives with its colon already percent-encoded. api.event encodes again, and
+  // the backend would then see a literal "%3A" and reject it. Decode first; this
+  // is a no-op for an id typed with a plain colon.
+  const { data, error } = await tryFetch(() => api.event(decodeURIComponent(eventId)));
 
   if (error || !data) {
     return (
